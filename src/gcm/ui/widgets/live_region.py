@@ -9,7 +9,7 @@ page's `aria-live="assertive"` region would.
 
 from __future__ import annotations
 
-from PySide6.QtGui import QAccessible
+from PySide6.QtGui import QAccessible, QAccessibleEvent
 from PySide6.QtWidgets import QLabel
 
 
@@ -17,6 +17,4 @@ def announce(label: QLabel, message: str) -> None:
     label.setText(message)
     label.setAccessibleName(message)
     if QAccessible.isActive():
-        QAccessible.updateAccessibility(
-            QAccessible.QAccessibleEvent(label, QAccessible.Alert)
-        )
+        QAccessible.updateAccessibility(QAccessibleEvent(label, QAccessible.Event.Alert))

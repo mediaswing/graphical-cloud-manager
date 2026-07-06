@@ -9,6 +9,19 @@ section below as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-06
+
+### Fixed
+- Sign-in crashed silently before ever opening a browser: the "announce this
+  status change to screen readers" helper called `QAccessible.QAccessibleEvent`,
+  which doesn't exist -- `QAccessibleEvent` is a top-level `QtGui` class, not
+  nested under `QAccessible`. The status label was updated to "Signing in to
+  ..." right before the crash, so the app looked permanently stuck there with
+  no error, no browser, and no indication anything had gone wrong. Automated
+  tests never caught this because they run with `QT_QPA_PLATFORM=offscreen`,
+  where `QAccessible.isActive()` is always `False`, so the buggy line never
+  executed; a new test forces that flag on to exercise the real code path.
+
 ## [0.1.1] - 2026-07-06
 
 ### Fixed
@@ -59,6 +72,7 @@ desktop app for administering Microsoft Entra, Intune, and Exchange.
   `http://localhost`) and set its Client ID / Tenant ID via **Tenant >
   Settings...** — see the README for step-by-step instructions.
 
-[Unreleased]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/mediaswing/graphical-cloud-manager/releases/tag/v0.1.0
