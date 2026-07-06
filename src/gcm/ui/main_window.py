@@ -31,11 +31,13 @@ from gcm.graph.capabilities import TenantCapabilities, detect_capabilities
 from gcm.graph.client import build_graph_client
 from gcm.services.graph_errors import friendly_error_message
 from gcm.ui.login_dialog import LoginDialog
+from gcm.ui.pages.devices_page import DevicesPage
 from gcm.ui.pages.exchange_page import ExchangePage
 from gcm.ui.pages.groups_page import GroupsPage
 from gcm.ui.pages.intune_page import IntunePage
 from gcm.ui.pages.licensing_page import LicensingPage
 from gcm.ui.pages.roles_page import RolesPage
+from gcm.ui.pages.sign_in_logs_page import SignInLogsPage
 from gcm.ui.pages.users_page import UsersPage
 from gcm.ui.settings_dialog import SettingsDialog
 from gcm.ui.widgets.live_region import announce
@@ -44,6 +46,7 @@ from gcm.ui.widgets.live_region import announce
 _CORE_PAGES = [
     ("Users", UsersPage),
     ("Groups", GroupsPage),
+    ("Devices", DevicesPage),
     ("Licensing", LicensingPage),
     ("Roles (RBAC)", RolesPage),
 ]
@@ -82,7 +85,7 @@ class MainWindow(QMainWindow):
         status_bar.addWidget(self.connection_label)
 
         self._add_core_pages()
-        self.set_capabilities(TenantCapabilities(has_intune=False, has_exchange=False))
+        self.set_capabilities(TenantCapabilities(has_intune=False, has_exchange=False, has_audit_logs=False))
         self.set_connected(False)
 
     def _make_status_label(self) -> QLabel:
@@ -162,6 +165,7 @@ class MainWindow(QMainWindow):
         self._graph_client = build_graph_client(auth_manager)
         self.users_page.set_graph_client(self._graph_client)
         self.groups_page.set_graph_client(self._graph_client)
+        self.devices_page.set_graph_client(self._graph_client)
         self.licensing_page.set_graph_client(self._graph_client)
         self.roles_page.set_graph_client(self._graph_client)
 
@@ -174,7 +178,7 @@ class MainWindow(QMainWindow):
                 "Signed in, but couldn't determine which products this tenant has: "
                 f"{friendly_error_message(exc)}",
             )
-            capabilities = TenantCapabilities(has_intune=False, has_exchange=False)
+            capabilities = TenantCapabilities(has_intune=False, has_exchange=False, has_audit_logs=False)
         self.set_capabilities(capabilities)
 
     def _on_sign_out_triggered(self) -> None:
@@ -184,10 +188,11 @@ class MainWindow(QMainWindow):
         self._graph_client = None
         self.users_page.set_graph_client(None)
         self.groups_page.set_graph_client(None)
+        self.devices_page.set_graph_client(None)
         self.licensing_page.set_graph_client(None)
         self.roles_page.set_graph_client(None)
         self.set_connected(False)
-        self.set_capabilities(TenantCapabilities(has_intune=False, has_exchange=False))
+        self.set_capabilities(TenantCapabilities(has_intune=False, has_exchange=False, has_audit_logs=False))
 
     def _add_core_pages(self) -> None:
         for label, page_cls in _CORE_PAGES:
@@ -199,6 +204,8 @@ class MainWindow(QMainWindow):
                 self.users_page = page
             elif label == "Groups":
                 self.groups_page = page
+            elif label == "Devices":
+                self.devices_page = page
             elif label == "Licensing":
                 self.licensing_page = page
             elif label == "Roles (RBAC)":
@@ -206,15 +213,20 @@ class MainWindow(QMainWindow):
         self.nav_list.setCurrentRow(0)
 
     def set_capabilities(self, capabilities: TenantCapabilities) -> None:
-        """Add/remove the Intune and Exchange nav entries based on what the
-        connected tenant is actually licensed for."""
+        """Add/remove the Intune/Exchange/Sign-in-logs nav entries based on
+        what the connected tenant is actually licensed for."""
         self._remove_optional_page("Intune")
         self._remove_optional_page("Exchange")
+        self._remove_optional_page("Sign-in logs")
 
         if capabilities.has_intune:
             self._add_optional_page("Intune", IntunePage())
         if capabilities.has_exchange:
             self._add_optional_page("Exchange", ExchangePage())
+        if capabilities.has_audit_logs:
+            sign_in_logs_page = SignInLogsPage()
+            sign_in_logs_page.set_graph_client(self._graph_client)
+            self._add_optional_page("Sign-in logs", sign_in_logs_page)
 
     def _add_optional_page(self, label: str, page: QWidget) -> None:
         item = QListWidgetItem(label)

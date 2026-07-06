@@ -64,6 +64,8 @@ The service layer is UI-framework-agnostic on purpose: it can be unit-tested wit
   - Core: `User.ReadWrite.All`, `Group.ReadWrite.All`, `Organization.Read.All` (tenant/capability detection), `Directory.Read.All`
   - Licensing: `Directory.ReadWrite.All` (group/user license assignment needs directory write)
   - RBAC (v1 = Entra only): `RoleManagement.ReadWrite.Directory`, `RoleEligibilitySchedule.ReadWrite.Directory` (PIM-eligible assignments, where the tenant is licensed for PIM)
+  - Devices: `Device.ReadWrite.All` -- requested unconditionally like the rest of Core, since Entra device objects don't require any particular tenant licensing (unlike Intune-managed device data, a separate and still-unimplemented module)
+  - Sign-in logs: `AuditLog.Read.All` -- also requested unconditionally (a scope can always be requested; it's the *data* that needs Azure AD Premium P1+, so capability detection hides the page instead of gating the scope)
   - Intune (only requested when capability detection finds Intune): `DeviceManagementManagedDevices.ReadWrite.All`, `DeviceManagementConfiguration.ReadWrite.All`, `DeviceManagementApps.ReadWrite.All`
   - Exchange (only requested when capability detection finds Exchange Online): Graph `MailboxSettings.ReadWrite`, plus EXO's own `https://outlook.office365.com/.default` for the PowerShell bridge
 
@@ -83,7 +85,7 @@ This file holds no secret -- a public client's Application (client) ID and a ten
 
 ## 5. Tenant capability detection
 
-On successful sign-in, the app calls `GET /subscribedSkus` and inspects `servicePlans` for Intune (`servicePlanName` containing `INTUNE`) and Exchange Online (`EXCHANGE_S_*` / `EXCHANGEONLINE`). The sidebar and the incremental-consent prompts for those scopes only appear if the corresponding service plan is present and enabled — a tenant without Intune never sees an Intune tab or gets asked to consent to device-management permissions.
+On successful sign-in, the app calls `GET /subscribedSkus` and inspects `servicePlans` for Intune (`servicePlanName` containing `INTUNE`), Exchange Online (`EXCHANGE_S_*` / `EXCHANGEONLINE`), and Azure AD Premium (`AAD_PREMIUM`, which also matches P2's `AAD_PREMIUM_P2` as a substring). The sidebar only shows Intune/Exchange/Sign-in logs if the corresponding service plan is present and enabled — a tenant without Intune never sees an Intune tab, and a tenant without at least Premium P1 never sees Sign-in logs (which would otherwise just show a permissions/licensing error).
 
 ## 6. Feature modules (v1 scope)
 
@@ -92,7 +94,9 @@ On successful sign-in, the app calls `GET /subscribedSkus` and inspects `service
 | Users | Implemented | List/search, create, edit profile fields (incl. `usageLocation`, needed before a license can be assigned), reset password, enable/disable and delete with multi-select bulk actions |
 | Groups | Implemented | Security + Microsoft 365 groups: list/search, create, delete, add/remove members by UPN or object ID. Dynamic membership rule editing is not yet implemented |
 | Licensing | Implemented | View `subscribedSkus` consumption tenant-wide; assign/remove licenses for a specific user via a checklist. Group-based licensing is not yet implemented |
-| RBAC | Entra directory roles only | List built-in + custom role definitions, view who's assigned to a role, assign/remove a user's assignment. PIM-eligible (as opposed to active) assignments are not yet implemented. Intune RBAC (scope tags) and Exchange RBAC (management role groups) are explicitly out of scope — different permission models, deferred to a later phase |
+| RBAC | Entra directory roles only | List built-in role definitions, view who's assigned to a role, assign/remove a user's assignment. Built on the classic `/directoryRoles` + `/directoryRoleTemplates` API rather than the unified RBAC API, which requires Azure AD Premium to return data at all -- see `services/role_service.py`'s module docstring. Custom role definitions and PIM-eligible (as opposed to active) assignments are not yet implemented. Intune RBAC (scope tags) and Exchange RBAC (management role groups) are explicitly out of scope — different permission models, deferred to a later phase |
+| Devices | Implemented | Entra-registered/joined devices: list/search, enable/disable, delete with multi-select bulk actions. This is device *identity* data (OS, trust type, compliance flag, last sign-in) via `/devices` -- it is not Intune's device management data, which is a separate, still-unimplemented module |
+| Sign-in logs | Implemented, Premium-gated | Read-only recent sign-in activity via `/auditLogs/signIns`, including which device (if any) was used, filterable by user. Only shown when capability detection finds Azure AD Premium P1 or higher, since the underlying data doesn't exist without it |
 | Intune | Not yet implemented | Placeholder page only; only visible if capability detection finds Intune |
 | Exchange | Not yet implemented | Placeholder page only; only visible if capability detection finds Exchange Online |
 
@@ -129,7 +133,7 @@ src/gcm/
     token_cache.py          # keyring-backed MSAL SerializableTokenCache
   graph/
     client.py               # GraphClient wrapper over msgraph-sdk
-    capabilities.py          # subscribedSkus → Intune/Exchange presence
+    capabilities.py          # subscribedSkus → Intune/Exchange/Premium presence
   exchange/
     exo_bridge.py            # subprocess → pwsh → ExchangeOnlineManagement, JSON protocol
   services/
@@ -137,11 +141,13 @@ src/gcm/
     group_service.py
     license_service.py
     role_service.py          # Entra directory roles only, see section 6
+    device_service.py         # Entra device identity, not Intune management data
+    sign_in_log_service.py    # Premium-gated, see section 6
     graph_errors.py           # ODataError -> plain-language message (esp. 403s)
     intune_service.py
     exchange_service.py
   config.py                # on-disk app config (tenant ID, client ID) -- see section 4a
-  models/                  # plain dataclasses shared by services + UI (user.py, group.py, license.py, role.py)
+  models/                  # plain dataclasses shared by services + UI (user.py, group.py, license.py, role.py, device.py, sign_in.py)
   ui/
     main_window.py
     login_dialog.py
@@ -149,8 +155,10 @@ src/gcm/
     pages/
       users_page.py
       groups_page.py
+      devices_page.py
       licensing_page.py
       roles_page.py
+      sign_in_logs_page.py
       intune_page.py
       exchange_page.py
     widgets/                # shared accessible widgets (accessible_button.py, data_table.py, ...)

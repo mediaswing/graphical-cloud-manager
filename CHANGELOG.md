@@ -9,6 +9,43 @@ section below as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-06
+
+### Added
+- **Devices**: list/search Entra-registered/joined devices (name, OS,
+  trust type, compliance, managed status, last sign-in), enable/disable and
+  delete with multi-select bulk actions. This is device *identity* data, not
+  Intune's device management data (still a separate, unimplemented module).
+- **Sign-in logs**: read-only recent sign-in activity, including which
+  device (if any) was used, filterable by user. Only requires Azure AD
+  Premium P1+ to actually return data, so the page is only shown when tenant
+  capability detection finds that licensing -- a tenant without Premium
+  never sees it rather than getting an empty or erroring page.
+
+### Fixed
+- **Roles (RBAC) always showed "0 role(s)"** on tenants without Azure AD
+  Premium. It was built on the newer unified RBAC API
+  (`/roleManagement/directory/*`), which is the API PIM eligible-assignment
+  scheduling uses -- and it turns out that API requires Premium to return
+  *any* data, silently, with no error, even though plain role assignment is
+  a free-tier Entra feature. Switched to the classic `/directoryRoles` +
+  `/directoryRoleTemplates` API, which works on every tier and uses the same
+  add/remove-member pattern already proven out in Groups. The one trade-off:
+  this classic API only covers built-in roles, not custom ones -- but
+  creating a custom role itself requires Premium, so a free-tier tenant has
+  none to miss.
+
+### Changed
+- The app now requests `Device.ReadWrite.All` and `AuditLog.Read.All` at
+  sign-in alongside the existing core scopes. **Existing installs will need
+  to sign in again** (and the tenant's admin-consent grant may need
+  refreshing) to pick these up, since a cached token won't have them yet.
+
+### Notes
+- Sign-in log filtering matches the start of a user's display name or
+  user principal name (Graph's sign-in logs don't support the `$search`
+  used elsewhere in the app).
+
 ## [0.2.0] - 2026-07-06
 
 First release with real directory administration -- previous releases only
@@ -106,7 +143,8 @@ desktop app for administering Microsoft Entra, Intune, and Exchange.
   `http://localhost`) and set its Client ID / Tenant ID via **Tenant >
   Settings...** — see the README for step-by-step instructions.
 
-[Unreleased]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.0...v0.1.1

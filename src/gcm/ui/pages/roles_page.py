@@ -257,7 +257,9 @@ class RolesPage(QWidget):
         ):
             return
         try:
-            await self._service.remove_role_assignment(assignment.id)
+            await self._service.remove_role_assignment(
+                self._selected_role.id, assignment.principal_id
+            )
         except Exception as exc:
             QMessageBox.critical(
                 self, "Couldn't remove role assignment", friendly_error_message(exc)

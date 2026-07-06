@@ -15,13 +15,20 @@ import msal
 from gcm.auth.token_cache import KeyringTokenCache
 from gcm.config import AppConfig
 
-# Scopes requested unconditionally, on every sign-in.
+# Scopes requested unconditionally, on every sign-in. Device management and
+# audit-log reading don't require any particular tenant licensing to
+# *request* -- only Devices always works, while sign-in logs additionally
+# need the tenant to have Azure AD Premium P1+ (checked via
+# TenantCapabilities.has_audit_logs, which just hides the page rather than
+# gating what's requested here).
 CORE_SCOPES = [
     "User.ReadWrite.All",
     "Group.ReadWrite.All",
     "Organization.Read.All",
     "Directory.ReadWrite.All",
     "RoleManagement.ReadWrite.Directory",
+    "Device.ReadWrite.All",
+    "AuditLog.Read.All",
 ]
 
 # Requested only once tenant capability detection (see graph/capabilities.py)

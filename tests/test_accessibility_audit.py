@@ -22,6 +22,7 @@ from gcm.models.user import UserDetail
 from gcm.ui.login_dialog import LoginDialog
 from gcm.ui.main_window import MainWindow
 from gcm.ui.pages.groups_page import NewGroupDialog
+from gcm.ui.pages.sign_in_logs_page import SignInLogsPage
 from gcm.ui.pages.users_page import EditUserDialog, NewUserDialog, ResetPasswordDialog
 from gcm.ui.settings_dialog import SettingsDialog
 
@@ -99,6 +100,16 @@ def test_reset_password_dialog_controls_have_accessible_names(qtbot):
     assert not unlabeled, f"Controls missing accessible names: {unlabeled}"
 
 
+def test_sign_in_logs_page_controls_have_accessible_names(qtbot):
+    # Not part of MainWindow's default tree -- it's only added when
+    # capability detection finds Azure AD Premium, so it needs its own check.
+    page = SignInLogsPage()
+    qtbot.addWidget(page)
+
+    unlabeled = _find_unlabeled(page)
+    assert not unlabeled, f"Controls missing accessible names: {unlabeled}"
+
+
 def test_settings_dialog_controls_have_accessible_names(qtbot, tmp_path, monkeypatch):
     monkeypatch.setenv("GCM_CONFIG_PATH", str(tmp_path / "config.toml"))
     dialog = SettingsDialog()
@@ -129,4 +140,6 @@ def test_main_window_nav_is_keyboard_reachable(qtbot):
     qtbot.addWidget(window)
 
     assert window.nav_list.focusPolicy() != 0, "Section navigation must be keyboard-focusable"
-    assert window.nav_list.count() >= 4, "Core sections (Users/Groups/Licensing/Roles) must be present"
+    assert window.nav_list.count() >= 5, (
+        "Core sections (Users/Groups/Devices/Licensing/Roles) must be present"
+    )
