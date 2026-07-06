@@ -29,8 +29,11 @@ from gcm.auth.auth_manager import AuthManager
 from gcm.config import load_config
 from gcm.graph.capabilities import TenantCapabilities, detect_capabilities
 from gcm.graph.client import build_graph_client
+from gcm.services import audit_log
 from gcm.services.graph_errors import friendly_error_message
 from gcm.ui.login_dialog import LoginDialog
+from gcm.ui.pages.audit_log_page import AuditLogPage
+from gcm.ui.pages.bulk_import_page import BulkImportPage
 from gcm.ui.pages.devices_page import DevicesPage
 from gcm.ui.pages.exchange_page import ExchangePage
 from gcm.ui.pages.groups_page import GroupsPage
@@ -49,6 +52,8 @@ _CORE_PAGES = [
     ("Devices", DevicesPage),
     ("Licensing", LicensingPage),
     ("Roles (RBAC)", RolesPage),
+    ("Bulk import", BulkImportPage),
+    ("Audit log", AuditLogPage),
 ]
 
 
@@ -161,6 +166,7 @@ class MainWindow(QMainWindow):
 
         self._auth_manager = auth_manager
         self.set_connected(True, result.account_username)
+        audit_log.set_actor(result.account_username)
 
         self._graph_client = build_graph_client(auth_manager)
         self.users_page.set_graph_client(self._graph_client)
@@ -168,6 +174,7 @@ class MainWindow(QMainWindow):
         self.devices_page.set_graph_client(self._graph_client)
         self.licensing_page.set_graph_client(self._graph_client)
         self.roles_page.set_graph_client(self._graph_client)
+        self.bulk_import_page.set_graph_client(self._graph_client)
 
         try:
             capabilities = await detect_capabilities(self._graph_client)
@@ -191,6 +198,7 @@ class MainWindow(QMainWindow):
         self.devices_page.set_graph_client(None)
         self.licensing_page.set_graph_client(None)
         self.roles_page.set_graph_client(None)
+        self.bulk_import_page.set_graph_client(None)
         self.set_connected(False)
         self.set_capabilities(TenantCapabilities(has_intune=False, has_exchange=False, has_audit_logs=False))
 
@@ -210,19 +218,28 @@ class MainWindow(QMainWindow):
                 self.licensing_page = page
             elif label == "Roles (RBAC)":
                 self.roles_page = page
+            elif label == "Bulk import":
+                self.bulk_import_page = page
+            elif label == "Audit log":
+                self.audit_log_page = page
         self.nav_list.setCurrentRow(0)
 
     def set_capabilities(self, capabilities: TenantCapabilities) -> None:
         """Add/remove the Intune/Exchange/Sign-in-logs nav entries based on
         what the connected tenant is actually licensed for."""
+        self.users_page.set_has_audit_logs(capabilities.has_audit_logs)
         self._remove_optional_page("Intune")
         self._remove_optional_page("Exchange")
         self._remove_optional_page("Sign-in logs")
 
         if capabilities.has_intune:
-            self._add_optional_page("Intune", IntunePage())
+            intune_page = IntunePage()
+            intune_page.set_graph_client(self._graph_client)
+            self._add_optional_page("Intune", intune_page)
         if capabilities.has_exchange:
-            self._add_optional_page("Exchange", ExchangePage())
+            exchange_page = ExchangePage()
+            exchange_page.set_graph_client(self._graph_client)
+            self._add_optional_page("Exchange", exchange_page)
         if capabilities.has_audit_logs:
             sign_in_logs_page = SignInLogsPage()
             sign_in_logs_page.set_graph_client(self._graph_client)

@@ -15,18 +15,22 @@ from PySide6.QtWidgets import (
     QComboBox,
     QLineEdit,
     QListWidget,
+    QPlainTextEdit,
     QWidget,
 )
 
 from gcm.models.user import UserDetail
+from gcm.ui.dialogs.dynamic_rule_dialog import DynamicRuleDialog
 from gcm.ui.login_dialog import LoginDialog
 from gcm.ui.main_window import MainWindow
+from gcm.ui.pages.exchange_page import ExchangePage
 from gcm.ui.pages.groups_page import NewGroupDialog
+from gcm.ui.pages.intune_page import IntunePage
 from gcm.ui.pages.sign_in_logs_page import SignInLogsPage
 from gcm.ui.pages.users_page import EditUserDialog, NewUserDialog, ResetPasswordDialog
 from gcm.ui.settings_dialog import SettingsDialog
 
-_CHECKED_TYPES = (QAbstractButton, QLineEdit, QComboBox, QListWidget)
+_CHECKED_TYPES = (QAbstractButton, QLineEdit, QComboBox, QListWidget, QPlainTextEdit)
 
 
 def _find_unlabeled(root: QWidget) -> list[str]:
@@ -75,6 +79,14 @@ def test_new_group_dialog_controls_have_accessible_names(qtbot):
     assert not unlabeled, f"Controls missing accessible names: {unlabeled}"
 
 
+def test_dynamic_rule_dialog_controls_have_accessible_names(qtbot):
+    dialog = DynamicRuleDialog("Sales Team", '(user.department -eq "Sales")', is_microsoft_365=False)
+    qtbot.addWidget(dialog)
+
+    unlabeled = _find_unlabeled(dialog)
+    assert not unlabeled, f"Controls missing accessible names: {unlabeled}"
+
+
 def test_edit_user_dialog_controls_have_accessible_names(qtbot):
     detail = UserDetail(
         id="u1",
@@ -104,6 +116,26 @@ def test_sign_in_logs_page_controls_have_accessible_names(qtbot):
     # Not part of MainWindow's default tree -- it's only added when
     # capability detection finds Azure AD Premium, so it needs its own check.
     page = SignInLogsPage()
+    qtbot.addWidget(page)
+
+    unlabeled = _find_unlabeled(page)
+    assert not unlabeled, f"Controls missing accessible names: {unlabeled}"
+
+
+def test_intune_page_controls_have_accessible_names(qtbot):
+    # Not part of MainWindow's default tree -- it's only added when
+    # capability detection finds Intune, so it needs its own check.
+    page = IntunePage()
+    qtbot.addWidget(page)
+
+    unlabeled = _find_unlabeled(page)
+    assert not unlabeled, f"Controls missing accessible names: {unlabeled}"
+
+
+def test_exchange_page_controls_have_accessible_names(qtbot):
+    # Not part of MainWindow's default tree -- it's only added when
+    # capability detection finds Exchange Online, so it needs its own check.
+    page = ExchangePage()
     qtbot.addWidget(page)
 
     unlabeled = _find_unlabeled(page)
@@ -140,6 +172,6 @@ def test_main_window_nav_is_keyboard_reachable(qtbot):
     qtbot.addWidget(window)
 
     assert window.nav_list.focusPolicy() != 0, "Section navigation must be keyboard-focusable"
-    assert window.nav_list.count() >= 5, (
-        "Core sections (Users/Groups/Devices/Licensing/Roles) must be present"
+    assert window.nav_list.count() >= 7, (
+        "Core sections (Users/Groups/Devices/Licensing/Roles/Bulk import/Audit log) must be present"
     )

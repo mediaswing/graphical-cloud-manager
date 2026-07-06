@@ -233,7 +233,10 @@ class RolesPage(QWidget):
             self.assignments_label.setText("Enter a user principal name or object ID first.")
             return
         try:
-            await self._service.assign_role(self._selected_role.id, upn_or_id)
+            await self._service.assign_role(
+                self._selected_role.id, upn_or_id,
+                role_display_name=self._selected_role.display_name,
+            )
         except Exception as exc:
             QMessageBox.critical(self, "Couldn't assign role", friendly_error_message(exc))
             return
@@ -258,7 +261,9 @@ class RolesPage(QWidget):
             return
         try:
             await self._service.remove_role_assignment(
-                self._selected_role.id, assignment.principal_id
+                self._selected_role.id, assignment.principal_id,
+                role_display_name=self._selected_role.display_name,
+                principal_display_name=assignment.principal_display_name,
             )
         except Exception as exc:
             QMessageBox.critical(

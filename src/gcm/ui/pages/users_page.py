@@ -21,9 +21,12 @@ from qasync import asyncSlot
 
 from gcm.models.user import UserDetail, UserSummary
 from gcm.services.graph_errors import friendly_error_message
+from gcm.services.impact_preview import build_user_impact_preview
 from gcm.services.user_service import UserService
 from gcm.ui.widgets.accessible_button import AccessibleButton
 from gcm.ui.widgets.confirm import confirm_destructive
+from gcm.ui.widgets.csv_export_button import CsvExportButton
+from gcm.ui.widgets.impact_preview_dialog import ImpactPreviewDialog
 
 _COLUMNS = ["Display name", "User principal name", "Email", "Status"]
 
@@ -40,6 +43,9 @@ class UsersTableModel(QAbstractTableModel):
 
     def user_at(self, row: int) -> UserSummary:
         return self._users[row]
+
+    def all_users(self) -> list[UserSummary]:
+        return list(self._users)
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self._users)
@@ -260,6 +266,8 @@ class UsersPage(QWidget):
         super().__init__(parent)
         self.setAccessibleName("Users")
         self._service: UserService | None = None
+        self._graph_client = None
+        self._has_audit_logs = False
 
         layout = QVBoxLayout(self)
 
@@ -323,6 +331,11 @@ class UsersPage(QWidget):
         self.delete_button = AccessibleButton("De&lete selected")
         self.delete_button.clicked.connect(self._on_delete_clicked)
         toolbar_row.addWidget(self.delete_button)
+
+        self.export_button = CsvExportButton(
+            self._csv_rows, self.status_label, default_filename="users.csv"
+        )
+        toolbar_row.addWidget(self.export_button)
         layout.addLayout(toolbar_row)
 
         self.model = UsersTableModel()
@@ -348,11 +361,13 @@ class UsersPage(QWidget):
             self.enable_button,
             self.disable_button,
             self.delete_button,
+            self.export_button,
             self.table,
         ):
             widget.setEnabled(enabled)
 
     def set_graph_client(self, graph_client) -> None:
+        self._graph_client = graph_client
         if graph_client is None:
             self._service = None
             self.model.set_users([])
@@ -365,9 +380,22 @@ class UsersPage(QWidget):
         self._set_controls_enabled(True)
         self._on_refresh_clicked()
 
+    def set_has_audit_logs(self, has_audit_logs: bool) -> None:
+        """Whether the impact preview can attempt a last-sign-in lookup --
+        only possible with Azure AD Premium."""
+        self._has_audit_logs = has_audit_logs
+
     def _selected_users(self) -> list[UserSummary]:
         rows = {index.row() for index in self.table.selectionModel().selectedRows()}
         return [self.model.user_at(row) for row in sorted(rows)]
+
+    def _csv_rows(self):
+        headers = ["Display name", "User principal name", "Email", "Status"]
+        rows = [
+            [u.display_name, u.user_principal_name, u.mail or "", "Enabled" if u.account_enabled else "Disabled"]
+            for u in self.model.all_users()
+        ]
+        return headers, rows
 
     @asyncSlot()
     async def _on_refresh_clicked(self) -> None:
@@ -431,7 +459,9 @@ class UsersPage(QWidget):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            await self._service.reset_password(users[0].id, dialog.new_password())
+            await self._service.reset_password(
+                users[0].id, dialog.new_password(), display_name=users[0].display_name
+            )
         except Exception as exc:
             QMessageBox.critical(self, "Couldn't reset password", friendly_error_message(exc))
             return
@@ -440,10 +470,6 @@ class UsersPage(QWidget):
     @asyncSlot()
     async def _on_enable_clicked(self) -> None:
         await self._set_selected_enabled(True)
-
-    @asyncSlot()
-    async def _on_disable_clicked(self) -> None:
-        await self._set_selected_enabled(False)
 
     async def _set_selected_enabled(self, enabled: bool) -> None:
         if self._service is None:
@@ -454,9 +480,37 @@ class UsersPage(QWidget):
             return
         try:
             for user in users:
-                await self._service.set_account_enabled(user.id, enabled)
+                await self._service.set_account_enabled(
+                    user.id, enabled, display_name=user.display_name
+                )
         except Exception as exc:
             QMessageBox.critical(self, "Couldn't update user(s)", friendly_error_message(exc))
+        await self._on_refresh_clicked()
+
+    @asyncSlot()
+    async def _on_disable_clicked(self) -> None:
+        # Disable is high-impact (locks the person out) but reversible, so
+        # this gets the impact preview but not the stronger type-to-confirm
+        # gate -- that's reserved for Delete, below, which is irreversible.
+        if self._service is None:
+            return
+        users = self._selected_users()
+        if not users:
+            self.status_label.setText("Select at least one user first.")
+            return
+        if not await self._confirm_with_impact_preview(
+            users, action_title="Disable user", verb="Disable",
+            action_sentence="They will not be able to sign in.",
+            require_typed_confirmation=False,
+        ):
+            return
+        try:
+            for user in users:
+                await self._service.set_account_enabled(
+                    user.id, False, display_name=user.display_name
+                )
+        except Exception as exc:
+            QMessageBox.critical(self, "Couldn't disable user(s)", friendly_error_message(exc))
         await self._on_refresh_clicked()
 
     @asyncSlot()
@@ -467,14 +521,52 @@ class UsersPage(QWidget):
         if not users:
             self.status_label.setText("Select at least one user first.")
             return
-        names = ", ".join(user.display_name for user in users)
-        if not confirm_destructive(
-            self, "Delete user(s)", f"Permanently delete {names}? This cannot be undone."
+        if not await self._confirm_with_impact_preview(
+            users, action_title="Delete user", verb="Permanently delete",
+            action_sentence="This cannot be undone.",
+            require_typed_confirmation=True,
         ):
             return
         try:
             for user in users:
-                await self._service.delete_user(user.id)
+                await self._service.delete_user(user.id, display_name=user.display_name)
         except Exception as exc:
             QMessageBox.critical(self, "Couldn't delete user(s)", friendly_error_message(exc))
         await self._on_refresh_clicked()
+
+    async def _confirm_with_impact_preview(
+        self,
+        users: list[UserSummary],
+        *,
+        action_title: str,
+        verb: str,
+        action_sentence: str,
+        require_typed_confirmation: bool,
+    ) -> bool:
+        """Shows the impact-preview dialog for a single selected user, or
+        falls back to a plain named confirmation for a multi-select bulk
+        action -- building one impact preview per row in a bulk action would
+        mean unbounded Graph traffic scaling with selection size, which is
+        exactly what this pattern is meant to avoid."""
+        if len(users) == 1 and self._graph_client is not None:
+            try:
+                preview = await build_user_impact_preview(
+                    self._graph_client, users[0].id, has_audit_logs=self._has_audit_logs
+                )
+            except Exception as exc:
+                return confirm_destructive(
+                    self, action_title,
+                    f"{verb} {users[0].display_name}? {action_sentence} "
+                    f"(Couldn't load impact preview: {friendly_error_message(exc)})",
+                )
+            dialog = ImpactPreviewDialog(
+                action_title,
+                f"{verb} {preview.display_name}? {action_sentence}",
+                preview,
+                require_typed_confirmation=require_typed_confirmation,
+                parent=self,
+            )
+            return dialog.exec() == QDialog.DialogCode.Accepted
+
+        names = ", ".join(user.display_name for user in users)
+        return confirm_destructive(self, action_title, f"{verb} {names}? {action_sentence}")

@@ -30,7 +30,10 @@ from msgraph.generated.models.directory_role import DirectoryRole
 from msgraph.generated.models.reference_create import ReferenceCreate
 from msgraph.generated.users.item.user_item_request_builder import UserItemRequestBuilder
 
+from gcm.graph.pagination import collect_all
 from gcm.models.role import RoleAssignmentSummary, RoleDefinitionSummary
+from gcm.services import audit_log
+from gcm.services.graph_errors import friendly_error_message
 
 _DIRECTORY_OBJECT_URL = "https://graph.microsoft.com/v1.0/directoryObjects/{id}"
 
@@ -40,39 +43,80 @@ class RoleService:
         self._graph = graph_client
 
     async def list_role_definitions(self) -> list[RoleDefinitionSummary]:
-        result = await self._graph.directory_role_templates.get()
-        return [_to_definition_summary(template) for template in (result.value or [])]
+        first_page = await self._graph.directory_role_templates.get()
+        templates = await collect_all(first_page, self._graph.request_adapter)
+        return [_to_definition_summary(template) for template in templates]
 
     async def list_role_assignments(self, role_template_id: str) -> list[RoleAssignmentSummary]:
         directory_role_id = await self._find_activated_role_id(role_template_id)
         if directory_role_id is None:
             return []  # never activated -- so nobody has been assigned it yet
-        result = await self._graph.directory_roles.by_directory_role_id(
+        first_page = await self._graph.directory_roles.by_directory_role_id(
             directory_role_id
         ).members.get()
-        return [_to_assignment_summary(member) for member in (result.value or [])]
+        members = await collect_all(first_page, self._graph.request_adapter)
+        return [_to_assignment_summary(member) for member in members]
 
-    async def assign_role(self, role_template_id: str, principal_upn_or_id: str) -> None:
-        directory_role_id = await self._get_or_activate_role(role_template_id)
-        query_params = UserItemRequestBuilder.UserItemRequestBuilderGetQueryParameters(
-            select=["id"],
-        )
-        request_config = RequestConfiguration(query_parameters=query_params)
-        user = await self._graph.users.by_user_id(principal_upn_or_id).get(
-            request_configuration=request_config
-        )
-        body = ReferenceCreate(odata_id=_DIRECTORY_OBJECT_URL.format(id=user.id))
-        await self._graph.directory_roles.by_directory_role_id(directory_role_id).members.ref.post(
-            body
+    async def assign_role(
+        self,
+        role_template_id: str,
+        principal_upn_or_id: str,
+        *,
+        role_display_name: str | None = None,
+    ) -> None:
+        target_name = f"{role_display_name or role_template_id} + {principal_upn_or_id}"
+        try:
+            directory_role_id = await self._get_or_activate_role(role_template_id)
+            query_params = UserItemRequestBuilder.UserItemRequestBuilderGetQueryParameters(
+                select=["id"],
+            )
+            request_config = RequestConfiguration(query_parameters=query_params)
+            user = await self._graph.users.by_user_id(principal_upn_or_id).get(
+                request_configuration=request_config
+            )
+            body = ReferenceCreate(odata_id=_DIRECTORY_OBJECT_URL.format(id=user.id))
+            await self._graph.directory_roles.by_directory_role_id(
+                directory_role_id
+            ).members.ref.post(body)
+        except Exception as exc:
+            audit_log.record(
+                "assign_role", "RoleAssignment", f"{role_template_id}:{principal_upn_or_id}",
+                target_name, result="failure", error=friendly_error_message(exc),
+            )
+            raise
+        audit_log.record(
+            "assign_role", "RoleAssignment", f"{role_template_id}:{principal_upn_or_id}",
+            target_name, result="success",
         )
 
-    async def remove_role_assignment(self, role_template_id: str, principal_id: str) -> None:
-        directory_role_id = await self._find_activated_role_id(role_template_id)
-        if directory_role_id is None:
-            return
-        await self._graph.directory_roles.by_directory_role_id(
-            directory_role_id
-        ).members.by_directory_object_id(principal_id).ref.delete()
+    async def remove_role_assignment(
+        self,
+        role_template_id: str,
+        principal_id: str,
+        *,
+        role_display_name: str | None = None,
+        principal_display_name: str | None = None,
+    ) -> None:
+        target_name = (
+            f"{role_display_name or role_template_id} - {principal_display_name or principal_id}"
+        )
+        try:
+            directory_role_id = await self._find_activated_role_id(role_template_id)
+            if directory_role_id is not None:
+                await self._graph.directory_roles.by_directory_role_id(
+                    directory_role_id
+                ).members.by_directory_object_id(principal_id).ref.delete()
+        except Exception as exc:
+            audit_log.record(
+                "remove_role_assignment", "RoleAssignment",
+                f"{role_template_id}:{principal_id}", target_name,
+                result="failure", error=friendly_error_message(exc),
+            )
+            raise
+        audit_log.record(
+            "remove_role_assignment", "RoleAssignment", f"{role_template_id}:{principal_id}",
+            target_name, result="success",
+        )
 
     async def _find_activated_role_id(self, role_template_id: str) -> str | None:
         query_params = DirectoryRolesRequestBuilder.DirectoryRolesRequestBuilderGetQueryParameters(

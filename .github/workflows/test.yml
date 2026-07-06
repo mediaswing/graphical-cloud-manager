@@ -13,6 +13,7 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
       GCM_CONFIG_PATH: /tmp/gcm-ci-config.toml
+      GCM_AUDIT_LOG_PATH: /tmp/gcm-ci-audit.jsonl
     steps:
       - uses: actions/checkout@v7
 

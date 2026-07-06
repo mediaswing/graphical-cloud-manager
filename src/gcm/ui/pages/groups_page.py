@@ -26,8 +26,10 @@ from qasync import asyncSlot
 from gcm.models.group import GroupMember, GroupSummary
 from gcm.services.graph_errors import friendly_error_message
 from gcm.services.group_service import GroupService
+from gcm.ui.dialogs.dynamic_rule_dialog import DynamicRuleDialog
 from gcm.ui.widgets.accessible_button import AccessibleButton
 from gcm.ui.widgets.confirm import confirm_destructive
+from gcm.ui.widgets.csv_export_button import CsvExportButton
 
 _COLUMNS = ["Display name", "Email", "Type"]
 
@@ -44,6 +46,9 @@ class GroupsTableModel(QAbstractTableModel):
 
     def group_at(self, row: int) -> GroupSummary:
         return self._groups[row]
+
+    def all_groups(self) -> list[GroupSummary]:
+        return list(self._groups)
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self._groups)
@@ -183,6 +188,15 @@ class GroupsPage(QWidget):
         self.delete_button = AccessibleButton("De&lete selected group")
         self.delete_button.clicked.connect(self._on_delete_clicked)
         toolbar_row.addWidget(self.delete_button)
+
+        self.dynamic_rule_button = AccessibleButton("D&ynamic membership rule...")
+        self.dynamic_rule_button.clicked.connect(self._on_dynamic_rule_clicked)
+        toolbar_row.addWidget(self.dynamic_rule_button)
+
+        self.export_button = CsvExportButton(
+            self._csv_rows, self.status_label, default_filename="groups.csv"
+        )
+        toolbar_row.addWidget(self.export_button)
         layout.addLayout(toolbar_row)
 
         splitter = QSplitter()
@@ -241,6 +255,8 @@ class GroupsPage(QWidget):
             self.refresh_button,
             self.new_button,
             self.delete_button,
+            self.dynamic_rule_button,
+            self.export_button,
             self.table,
         ):
             widget.setEnabled(enabled)
@@ -270,6 +286,14 @@ class GroupsPage(QWidget):
         self._service = GroupService(graph_client)
         self._set_controls_enabled(True)
         self._on_refresh_clicked()
+
+    def _csv_rows(self):
+        # Includes the object ID (not shown in the on-screen table) since
+        # it's what other pages, like Licensing's group panel, need you to
+        # paste in -- this CSV is the easiest way to look one up.
+        headers = ["Display name", "Email", "Type", "Object ID"]
+        rows = [[g.display_name, g.mail or "", g.group_type, g.id] for g in self.model.all_groups()]
+        return headers, rows
 
     @asyncSlot()
     async def _on_refresh_clicked(self) -> None:
@@ -311,10 +335,46 @@ class GroupsPage(QWidget):
         ):
             return
         try:
-            await self._service.delete_group(group.id)
+            await self._service.delete_group(group.id, display_name=group.display_name)
         except Exception as exc:
             QMessageBox.critical(self, "Couldn't delete group", friendly_error_message(exc))
         await self._on_refresh_clicked()
+
+    @asyncSlot()
+    async def _on_dynamic_rule_clicked(self) -> None:
+        if self._service is None or self._selected_group is None:
+            self.status_label.setText("Select a group first.")
+            return
+        group = self._selected_group
+        try:
+            info = await self._service.get_dynamic_membership_info(group.id)
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Couldn't load membership rule", friendly_error_message(exc)
+            )
+            return
+
+        dialog = DynamicRuleDialog(
+            group.display_name, info.membership_rule, info.is_microsoft_365, self
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            # groupTypes only ever holds a subset of {"Unified", "DynamicMembership"};
+            # set_membership_rule adds "DynamicMembership" itself if it's missing, so
+            # this only needs to carry over "Unified" (M365) status.
+            await self._service.set_membership_rule(
+                group.id,
+                dialog.rule_text(),
+                existing_group_types=["Unified"] if info.is_microsoft_365 else [],
+                display_name=group.display_name,
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Couldn't save membership rule", friendly_error_message(exc)
+            )
+            return
+        self.status_label.setText(f"Dynamic membership rule saved for {group.display_name}.")
 
     def _on_selection_changed(self) -> None:
         rows = {index.row() for index in self.table.selectionModel().selectedRows()}
@@ -355,7 +415,10 @@ class GroupsPage(QWidget):
             self.members_label.setText("Enter a user principal name or object ID first.")
             return
         try:
-            await self._service.add_member(self._selected_group.id, upn_or_id)
+            await self._service.add_member(
+                self._selected_group.id, upn_or_id,
+                group_display_name=self._selected_group.display_name,
+            )
         except Exception as exc:
             QMessageBox.critical(self, "Couldn't add member", friendly_error_message(exc))
             return
@@ -378,7 +441,11 @@ class GroupsPage(QWidget):
         ):
             return
         try:
-            await self._service.remove_member(self._selected_group.id, member.id)
+            await self._service.remove_member(
+                self._selected_group.id, member.id,
+                group_display_name=self._selected_group.display_name,
+                member_display_name=member.display_name,
+            )
         except Exception as exc:
             QMessageBox.critical(self, "Couldn't remove member", friendly_error_message(exc))
             return

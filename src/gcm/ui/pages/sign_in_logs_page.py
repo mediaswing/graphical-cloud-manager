@@ -23,6 +23,7 @@ from gcm.models.sign_in import SignInSummary
 from gcm.services.graph_errors import friendly_error_message
 from gcm.services.sign_in_log_service import SignInLogService
 from gcm.ui.widgets.accessible_button import AccessibleButton
+from gcm.ui.widgets.csv_export_button import CsvExportButton
 
 _COLUMNS = ["Time", "User", "Application", "Device", "Result"]
 
@@ -36,6 +37,9 @@ class SignInLogsTableModel(QAbstractTableModel):
         self.beginResetModel()
         self._sign_ins = sign_ins
         self.endResetModel()
+
+    def all_sign_ins(self) -> list[SignInSummary]:
+        return list(self._sign_ins)
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self._sign_ins)
@@ -111,9 +115,16 @@ class SignInLogsPage(QWidget):
         search_row.addWidget(self.search_button)
         layout.addLayout(search_row)
 
+        toolbar_row = QHBoxLayout()
         self.refresh_button = AccessibleButton("&Refresh")
         self.refresh_button.clicked.connect(self._on_refresh_clicked)
-        layout.addWidget(self.refresh_button)
+        toolbar_row.addWidget(self.refresh_button)
+
+        self.export_button = CsvExportButton(
+            self._csv_rows, self.status_label, default_filename="sign_in_logs.csv"
+        )
+        toolbar_row.addWidget(self.export_button)
+        layout.addLayout(toolbar_row)
 
         self.model = SignInLogsTableModel()
         self.table = QTableView()
@@ -126,8 +137,33 @@ class SignInLogsPage(QWidget):
         self._set_controls_enabled(False)
 
     def _set_controls_enabled(self, enabled: bool) -> None:
-        for widget in (self.search_edit, self.search_button, self.refresh_button, self.table):
+        for widget in (
+            self.search_edit,
+            self.search_button,
+            self.refresh_button,
+            self.export_button,
+            self.table,
+        ):
             widget.setEnabled(enabled)
+
+    def _csv_rows(self):
+        headers = ["Time", "User", "User principal name", "Application", "Device", "Device OS", "Result"]
+        rows = []
+        for entry in self.model.all_sign_ins():
+            time_str = entry.created_at.strftime("%Y-%m-%d %H:%M") if entry.created_at else "Unknown"
+            result = "Success" if entry.succeeded else f"Failed: {entry.failure_reason or 'unknown reason'}"
+            rows.append(
+                [
+                    time_str,
+                    entry.user_display_name,
+                    entry.user_principal_name,
+                    entry.app_display_name,
+                    entry.device_display_name or "",
+                    entry.device_operating_system or "",
+                    result,
+                ]
+            )
+        return headers, rows
 
     def set_graph_client(self, graph_client) -> None:
         if graph_client is None:

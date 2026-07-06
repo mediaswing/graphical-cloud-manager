@@ -10,7 +10,10 @@ from msgraph import GraphServiceClient
 from msgraph.generated.devices.devices_request_builder import DevicesRequestBuilder
 from msgraph.generated.models.device import Device
 
+from gcm.graph.pagination import collect_all
 from gcm.models.device import DeviceSummary
+from gcm.services import audit_log
+from gcm.services.graph_errors import friendly_error_message
 
 _SELECT = [
     "id",
@@ -38,14 +41,40 @@ class DeviceService:
             query_params.search = f'"displayName:{search}"'
             query_params.count = True
             request_config.headers.add("ConsistencyLevel", "eventual")
-        result = await self._graph.devices.get(request_configuration=request_config)
-        return [_to_summary(d) for d in (result.value or [])]
+        first_page = await self._graph.devices.get(request_configuration=request_config)
+        devices = await collect_all(first_page, self._graph.request_adapter)
+        return [_to_summary(d) for d in devices]
 
-    async def set_device_enabled(self, device_id: str, enabled: bool) -> None:
-        await self._graph.devices.by_device_id(device_id).patch(Device(account_enabled=enabled))
+    async def set_device_enabled(
+        self, device_id: str, enabled: bool, *, display_name: str | None = None
+    ) -> None:
+        try:
+            await self._graph.devices.by_device_id(device_id).patch(
+                Device(account_enabled=enabled)
+            )
+        except Exception as exc:
+            audit_log.record(
+                "set_device_enabled", "Device", device_id, display_name or device_id,
+                result="failure", error=friendly_error_message(exc),
+            )
+            raise
+        audit_log.record(
+            "set_device_enabled", "Device", device_id, display_name or device_id,
+            result="success", after={"account_enabled": enabled},
+        )
 
-    async def delete_device(self, device_id: str) -> None:
-        await self._graph.devices.by_device_id(device_id).delete()
+    async def delete_device(self, device_id: str, *, display_name: str | None = None) -> None:
+        try:
+            await self._graph.devices.by_device_id(device_id).delete()
+        except Exception as exc:
+            audit_log.record(
+                "delete_device", "Device", device_id, display_name or device_id,
+                result="failure", error=friendly_error_message(exc),
+            )
+            raise
+        audit_log.record(
+            "delete_device", "Device", device_id, display_name or device_id, result="success"
+        )
 
 
 def _to_summary(device: Device) -> DeviceSummary:

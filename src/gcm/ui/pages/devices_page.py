@@ -22,6 +22,7 @@ from gcm.services.device_service import DeviceService
 from gcm.services.graph_errors import friendly_error_message
 from gcm.ui.widgets.accessible_button import AccessibleButton
 from gcm.ui.widgets.confirm import confirm_destructive
+from gcm.ui.widgets.csv_export_button import CsvExportButton
 
 _COLUMNS = ["Display name", "Operating system", "Trust type", "Compliant", "Managed", "Status", "Last sign-in"]
 
@@ -44,6 +45,9 @@ class DevicesTableModel(QAbstractTableModel):
 
     def device_at(self, row: int) -> DeviceSummary:
         return self._devices[row]
+
+    def all_devices(self) -> list[DeviceSummary]:
+        return list(self._devices)
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self._devices)
@@ -136,6 +140,11 @@ class DevicesPage(QWidget):
         self.delete_button = AccessibleButton("De&lete selected")
         self.delete_button.clicked.connect(self._on_delete_clicked)
         toolbar_row.addWidget(self.delete_button)
+
+        self.export_button = CsvExportButton(
+            self._csv_rows, self.status_label, default_filename="devices.csv"
+        )
+        toolbar_row.addWidget(self.export_button)
         layout.addLayout(toolbar_row)
 
         self.model = DevicesTableModel()
@@ -158,6 +167,7 @@ class DevicesPage(QWidget):
             self.enable_button,
             self.disable_button,
             self.delete_button,
+            self.export_button,
             self.table,
         ):
             widget.setEnabled(enabled)
@@ -178,6 +188,30 @@ class DevicesPage(QWidget):
     def _selected_devices(self) -> list[DeviceSummary]:
         rows = {index.row() for index in self.table.selectionModel().selectedRows()}
         return [self.model.device_at(row) for row in sorted(rows)]
+
+    def _csv_rows(self):
+        headers = _COLUMNS
+        rows = []
+        for d in self.model.all_devices():
+            os_name = d.operating_system or "Unknown"
+            os_version = f" {d.operating_system_version}" if d.operating_system_version else ""
+            last_sign_in = (
+                d.approximate_last_sign_in.strftime("%Y-%m-%d %H:%M")
+                if d.approximate_last_sign_in
+                else "Never"
+            )
+            rows.append(
+                [
+                    d.display_name,
+                    f"{os_name}{os_version}",
+                    d.trust_type or "Unknown",
+                    _yes_no_unknown(d.is_compliant),
+                    _yes_no_unknown(d.is_managed),
+                    "Enabled" if d.account_enabled else "Disabled",
+                    last_sign_in,
+                ]
+            )
+        return headers, rows
 
     @asyncSlot()
     async def _on_refresh_clicked(self) -> None:
@@ -209,7 +243,9 @@ class DevicesPage(QWidget):
             return
         try:
             for device in devices:
-                await self._service.set_device_enabled(device.id, enabled)
+                await self._service.set_device_enabled(
+                    device.id, enabled, display_name=device.display_name
+                )
         except Exception as exc:
             QMessageBox.critical(self, "Couldn't update device(s)", friendly_error_message(exc))
         await self._on_refresh_clicked()
@@ -229,7 +265,7 @@ class DevicesPage(QWidget):
             return
         try:
             for device in devices:
-                await self._service.delete_device(device.id)
+                await self._service.delete_device(device.id, display_name=device.display_name)
         except Exception as exc:
             QMessageBox.critical(self, "Couldn't delete device(s)", friendly_error_message(exc))
         await self._on_refresh_clicked()

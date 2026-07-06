@@ -29,17 +29,21 @@ CORE_SCOPES = [
     "RoleManagement.ReadWrite.Directory",
     "Device.ReadWrite.All",
     "AuditLog.Read.All",
+    # Read-only for now -- the Intune module only lists devices this phase.
+    "DeviceManagementManagedDevices.Read.All",
+    # Rule-based forwarding (an inbox rule) and mailbox usage reports.
+    "Mail.ReadWrite",
+    "Reports.Read.All",
 ]
 
-# Requested only once tenant capability detection (see graph/capabilities.py)
-# finds the corresponding service plan, so a tenant without Intune is never
-# asked to consent to device-management permissions.
-INTUNE_SCOPES = [
+# Not yet requested anywhere: placeholders for if/when Intune grows remote
+# actions (wipe/retire/sync) or configuration/app management, which would
+# need write access beyond today's read-only device inventory.
+INTUNE_FUTURE_WRITE_SCOPES = [
     "DeviceManagementManagedDevices.ReadWrite.All",
     "DeviceManagementConfiguration.ReadWrite.All",
     "DeviceManagementApps.ReadWrite.All",
 ]
-EXCHANGE_SCOPES = ["MailboxSettings.ReadWrite"]
 
 
 @dataclass

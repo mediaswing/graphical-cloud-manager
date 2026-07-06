@@ -6,7 +6,7 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture, tech stack rational
 
 ## Status
 
-Sign-in, capability detection, and the main window/navigation shell are in place. Users, Groups, Devices, Licensing, and Roles (Entra directory roles) are implemented against Microsoft Graph, and Sign-in logs appear when the tenant has Azure AD Premium P1+ -- see `docs/DESIGN.md` section 6 for exactly what each covers. Intune and Exchange are still placeholder pages (see `docs/DESIGN.md` section 10 for the roadmap).
+Sign-in, capability detection, and the main window/navigation shell are in place. Users, Groups, Devices, Licensing (per-user and group-based), Roles (Entra directory roles), Bulk user import, and a local Audit log are implemented against Microsoft Graph; Sign-in logs appear when the tenant has Azure AD Premium P1+. Intune (read-only device inventory) and Exchange (aliases, automatic replies, rule-based forwarding, usage report) appear when capability detection finds them. Every list page can export to CSV, and single-user Delete/Disable show an impact preview before confirming -- see `docs/DESIGN.md` section 6 for exactly what each covers, and section 10 for what's intentionally not yet implemented.
 
 ## Development setup
 

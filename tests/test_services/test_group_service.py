@@ -4,9 +4,10 @@ the network -- they construct real msgraph model objects directly."""
 
 from __future__ import annotations
 
+import pytest
 from msgraph.generated.models.group import Group
 
-from gcm.services.group_service import _group_type, _to_summary
+from gcm.services.group_service import GroupService, _group_type, _to_summary
 
 
 def test_group_type_microsoft_365():
@@ -34,3 +35,35 @@ def test_to_summary_falls_back_to_placeholder_display_name():
     summary = _to_summary(group)
     assert summary.id == "g1"
     assert summary.display_name == "(no display name)"
+
+
+class _FakeGroupItemBuilder:
+    def __init__(self, group) -> None:
+        self._group = group
+
+    async def get(self, request_configuration=None):
+        return self._group
+
+
+class _FakeGroupsBuilder:
+    def __init__(self, group) -> None:
+        self._group = group
+
+    def by_group_id(self, group_id):
+        return _FakeGroupItemBuilder(self._group)
+
+
+class _FakeGraphClient:
+    def __init__(self, group) -> None:
+        self.groups = _FakeGroupsBuilder(group)
+
+
+@pytest.mark.asyncio
+async def test_get_group_fetches_a_single_group_by_id():
+    group = Group(id="g1", display_name="Sales Team", group_types=[], security_enabled=True)
+    service = GroupService(_FakeGraphClient(group))
+
+    summary = await service.get_group("g1")
+
+    assert summary.id == "g1"
+    assert summary.display_name == "Sales Team"

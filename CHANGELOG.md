@@ -9,6 +9,92 @@ section below as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-07
+
+### Added
+- **CSV export**: every list page (Users, Groups, Devices, Licensing,
+  Roles, Sign-in logs, Intune, Audit log) has an `Export CSV...` button.
+  Runs off the UI thread so exporting a large tenant's worth of data never
+  freezes the window; opens a native, accessible save dialog.
+- **Local audit log**: every write action this app performs (create/edit/
+  delete/enable/disable a user, group membership changes, license changes,
+  role assignment changes, bulk import rows, mailbox rule changes, etc.) is
+  now recorded locally with actor, timestamp, action, target, success/
+  failure, and before/after state where relevant. A new **Audit log** page
+  lets you filter, search, and export it to CSV. This is a convenience log
+  for whoever is running this app -- it does not replace Entra/Intune/
+  Exchange's own server-side audit logs, and passwords/secrets are never
+  written to it (e.g. a password reset logs that a reset happened, never
+  the new password).
+- **Bulk user import from CSV**: a new **Bulk import** page reads a CSV
+  file (template: `docs/bulk_import_template.csv`), validates every row up
+  front (required columns, UPN format, duplicate UPNs, existing-user
+  check), shows a preview that clearly separates blocking errors from
+  non-blocking warnings, then runs with bounded concurrency so one row's
+  failure never stops the others. Every row's outcome is shown and logged
+  -- nothing fails silently.
+- **Group-based licensing**: the Licensing page now has a group-licensing
+  panel alongside the existing per-user one -- assign/remove a license at
+  the group level, with Microsoft's asynchronous processing state shown
+  explicitly rather than implying instant effect. The per-user panel now
+  also distinguishes licenses assigned directly from ones inherited
+  through a group.
+- **Dynamic group membership rule editor**: Groups can now view and edit a
+  dynamic membership rule, via a raw text editor pre-filled with the
+  existing rule, a guided builder for common single-condition rules, a
+  preview, and client-side syntax validation (explicitly not a guarantee
+  Entra will accept the rule -- only Entra fully validates rule semantics).
+- **Intune device inventory** (read-only): a real Intune page listing
+  managed devices (name, OS/version, compliance, management state, owner
+  type, primary user, last check-in, serial/UDID/IMEI), filterable and
+  CSV-exportable. No remote actions (wipe/retire/sync) in this phase --
+  see "Deferred" below.
+- **Exchange mailbox basics**: a real Exchange page covering mailbox
+  aliases, automatic replies, rule-based mail forwarding (via an inbox
+  rule this app manages -- see "Deferred" below for why this isn't native
+  forwarding), and a read-only mailbox usage/quota report. External
+  forwarding destinations are called out explicitly and require
+  confirmation to enable.
+- **Impact-preview safety framework**: deleting or disabling a single
+  selected user now shows what's cheaply known about them first --
+  licenses, group and admin-role memberships, and last sign-in if the
+  tenant has Azure AD Premium -- before you confirm. Delete requires
+  typing the user's display name to confirm; disable uses a plain
+  confirmation, since it's reversible. Bulk (multi-select) actions still
+  use a plain named confirmation rather than building one preview per row.
+
+### Fixed
+- Every list-fetching call in the app (Users, Groups, Devices, etc.) now
+  follows `@odata.nextLink` to retrieve every page of results. Previously
+  each call fetched only the first page (up to 999 rows) and silently
+  stopped there -- a tenant with more than 999 users or devices was
+  missing rows with no indication anything was cut off.
+
+### Changed
+- The app now requests `DeviceManagementManagedDevices.Read.All`,
+  `Mail.ReadWrite`, and `Reports.Read.All` at sign-in alongside the
+  existing core scopes. **Existing installs will need to sign in again**
+  (and the tenant's admin-consent grant may need refreshing) to pick these
+  up.
+
+### Deferred (and why)
+- **Intune remote actions** (wipe/retire/sync/etc.): out of scope for this
+  phase by design -- these are higher-consequence than read-only
+  inventory and deserve their own confirmation/impact-preview treatment
+  rather than being rushed in alongside everything else above.
+- **Native Exchange forwarding** (`Set-Mailbox -ForwardingSmtpAddress`):
+  Microsoft Graph has no property corresponding to this anywhere in the
+  SDK -- it's genuinely EXO-PowerShell-only. Rule-based forwarding (an
+  inbox rule) is the closest Graph-native substitute and is labeled as
+  such throughout, never called "mailbox forwarding" unqualified.
+- **Shared mailbox identification**: there's no reliable Graph signal on
+  the `user` resource to tell a shared mailbox apart from a regular one,
+  so this app doesn't try to guess.
+- **Custom RBAC role definitions** and **PIM-eligible (as opposed to
+  active) role assignments**: unchanged limitation from the classic
+  directory-roles API this app uses for free-tier compatibility (see
+  v0.3.0's Roles fix, below).
+
 ## [0.3.0] - 2026-07-06
 
 ### Added
@@ -143,7 +229,8 @@ desktop app for administering Microsoft Entra, Intune, and Exchange.
   `http://localhost`) and set its Client ID / Tenant ID via **Tenant >
   Settings...** — see the README for step-by-step instructions.
 
-[Unreleased]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.1...v0.1.2

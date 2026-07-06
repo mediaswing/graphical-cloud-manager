@@ -25,17 +25,28 @@ class AppConfig:
         return f"https://login.microsoftonline.com/{self.tenant_id}"
 
 
-def config_path() -> Path:
-    override = os.environ.get("GCM_CONFIG_PATH")
-    if override:
-        return Path(override)
+def _app_dir() -> Path:
     if sys.platform == "darwin":
         base = Path.home() / "Library" / "Application Support"
     elif sys.platform == "win32":
         base = Path(os.environ.get("APPDATA", Path.home()))
     else:
         base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / _APP_DIR_NAME / "config.toml"
+    return base / _APP_DIR_NAME
+
+
+def config_path() -> Path:
+    override = os.environ.get("GCM_CONFIG_PATH")
+    if override:
+        return Path(override)
+    return _app_dir() / "config.toml"
+
+
+def audit_log_path() -> Path:
+    override = os.environ.get("GCM_AUDIT_LOG_PATH")
+    if override:
+        return Path(override)
+    return _app_dir() / "audit.jsonl"
 
 
 def load_config() -> AppConfig | None:
