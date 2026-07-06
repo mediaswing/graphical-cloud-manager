@@ -1,0 +1,109 @@
+name: Build binaries
+
+# Build Windows, macOS, and Linux binaries. Runs on demand, on every push to
+# main and PR (to catch breakage), and on every version tag (e.g.
+# `git tag v0.1.0 && git push --tags`), which also attaches the binaries to a
+# GitHub Release.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: GraphicalCloudManager-linux
+          - os: windows-latest
+            artifact: GraphicalCloudManager-windows
+          - os: macos-latest
+            artifact: GraphicalCloudManager-macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # PySide6's analysis/import step needs these even though the build
+      # itself never opens a display.
+      - name: Install Qt build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon0 libxcb-cursor0
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pyinstaller
+
+      - name: Build
+        run: pyinstaller --noconfirm --clean GraphicalCloudManager.spec
+
+      # Zip the build here, on the build machine, so the executable bit
+      # survives. upload-artifact does NOT preserve Unix permissions, so
+      # uploading the unzipped tree leaves the macOS/Linux launcher
+      # non-executable ("permission denied") for whoever downloads it. A
+      # pre-made zip is stored byte-for-byte, keeping perms (and, on macOS, the
+      # ad-hoc signature via ditto) intact.
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --sequesterRsrc --keepParent dist/GraphicalCloudManager.app "${{ matrix.artifact }}.zip"
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: cd dist && zip -r "../${{ matrix.artifact }}.zip" GraphicalCloudManager
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist\GraphicalCloudManager -DestinationPath "${{ matrix.artifact }}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip
+
+  release:
+    # Attach the built binaries to a GitHub Release when a tag is pushed.
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # required to create the release and upload assets
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+      # Each build job already uploaded a ready-to-ship zip (with permissions
+      # preserved), so just list them; no re-zipping that would strip perms.
+      - name: List release assets
+        run: find artifacts -name '*.zip' -print
+      - name: Extract release notes from CHANGELOG
+        run: |
+          # Pull the section for this tag's version (v1.2.3 -> [1.2.3]) out of
+          # CHANGELOG.md and use it as the release body.
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="$version" '
+            $0 ~ "^## \\[" ver "\\]" { grab = 1; next }
+            grab && /^## \[/         { exit }
+            grab && /^\[[^]]+\]: /   { next }   # skip link-reference defs
+            grab                     { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "Release ${GITHUB_REF_NAME}" > RELEASE_NOTES.md
+          fi
+          cat RELEASE_NOTES.md
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          body_path: RELEASE_NOTES.md
+          files: "artifacts/**/*.zip"
