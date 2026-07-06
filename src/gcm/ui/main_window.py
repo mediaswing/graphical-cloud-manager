@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QDialog,
     QLabel,
@@ -91,21 +92,32 @@ class MainWindow(QMainWindow):
         menu_bar = self.menuBar()
         app_menu = menu_bar.addMenu("&Tenant")
 
+        # Qt's default MenuRole is TextHeuristicRole, which scans an action's
+        # text for words like "settings"/"preferences" and silently moves it
+        # to the platform application menu on macOS (next to the Apple logo)
+        # instead of leaving it in the menu we put it in. NoRole disables
+        # that so Settings stays in the Tenant menu on every platform.
         self.settings_action = app_menu.addAction("&Settings...")
+        self.settings_action.setMenuRole(QAction.MenuRole.NoRole)
         self.settings_action.setShortcut("Ctrl+,")
         self.settings_action.triggered.connect(self._on_settings_triggered)
 
         self.sign_in_action = app_menu.addAction("Sign &in...")
+        self.sign_in_action.setMenuRole(QAction.MenuRole.NoRole)
         self.sign_in_action.setShortcut("Ctrl+Shift+I")
         self.sign_in_action.triggered.connect(self._on_sign_in_triggered)
 
         self.sign_out_action = app_menu.addAction("Sign &out")
+        self.sign_out_action.setMenuRole(QAction.MenuRole.NoRole)
         self.sign_out_action.setShortcut("Ctrl+Shift+O")
         self.sign_out_action.setEnabled(False)
         self.sign_out_action.triggered.connect(self._on_sign_out_triggered)
 
         app_menu.addSeparator()
 
+        # Left at the default heuristic role on purpose: "Exit" gets moved to
+        # "Quit GraphicalCloudManager" under the macOS app menu, which is
+        # exactly where Mac users expect quit to live (unlike Settings above).
         exit_action = app_menu.addAction("E&xit")
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)

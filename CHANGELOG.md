@@ -9,6 +9,20 @@ section below as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-06
+
+### Fixed
+- The **Tenant > Settings...** menu item was silently moved off the Tenant
+  menu on macOS. Qt's default action `MenuRole` scans an action's text for
+  words like "settings"/"preferences" and relocates matching actions to the
+  macOS application menu (next to the Apple logo); "Settings..." tripped that
+  heuristic and ended up there instead of staying in the Tenant menu as
+  intended, making it look like the option didn't exist at all. Settings,
+  Sign in, and Sign out are now pinned to `MenuRole.NoRole` so they stay in
+  the Tenant menu on every platform. ("Exit" is left on the default heuristic
+  on purpose -- moving to "Quit GraphicalCloudManager" under the macOS app
+  menu is the expected native behavior there.)
+
 ## [0.1.0] - 2026-07-06
 
 First release of **Graphical Cloud Manager** — an accessible, cross-platform
@@ -44,3 +58,7 @@ desktop app for administering Microsoft Entra, Intune, and Exchange.
 - Before signing in, register your own Entra app (public client, redirect URI
   `http://localhost`) and set its Client ID / Tenant ID via **Tenant >
   Settings...** — see the README for step-by-step instructions.
+
+[Unreleased]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/mediaswing/graphical-cloud-manager/releases/tag/v0.1.0

@@ -9,6 +9,7 @@ described in docs/DESIGN.md section 7 remains the release gate for quality.
 
 from __future__ import annotations
 
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QAbstractButton,
     QComboBox,
@@ -61,6 +62,22 @@ def test_settings_dialog_controls_have_accessible_names(qtbot, tmp_path, monkeyp
 
     unlabeled = _find_unlabeled(dialog)
     assert not unlabeled, f"Controls missing accessible names: {unlabeled}"
+
+
+def test_tenant_menu_actions_stay_in_the_tenant_menu(qtbot):
+    """Qt's default MenuRole is a text heuristic that silently relocates
+    actions like "Settings..." to the macOS application menu, out of the menu
+    they were actually added to -- a real user hit this (the item just
+    looked missing). Pin these to NoRole so they stay put on every platform.
+    """
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    for action in (window.settings_action, window.sign_in_action, window.sign_out_action):
+        assert action.menuRole() == QAction.MenuRole.NoRole, (
+            f"{action.text()!r} must use MenuRole.NoRole or macOS may move it "
+            "out of the Tenant menu"
+        )
 
 
 def test_main_window_nav_is_keyboard_reachable(qtbot):
