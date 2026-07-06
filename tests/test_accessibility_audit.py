@@ -18,8 +18,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gcm.models.user import UserDetail
 from gcm.ui.login_dialog import LoginDialog
 from gcm.ui.main_window import MainWindow
+from gcm.ui.pages.groups_page import NewGroupDialog
+from gcm.ui.pages.users_page import EditUserDialog, NewUserDialog, ResetPasswordDialog
 from gcm.ui.settings_dialog import SettingsDialog
 
 _CHECKED_TYPES = (QAbstractButton, QLineEdit, QComboBox, QListWidget)
@@ -49,6 +52,47 @@ def test_main_window_controls_have_accessible_names(qtbot):
 
 def test_login_dialog_controls_have_accessible_names(qtbot):
     dialog = LoginDialog()
+    qtbot.addWidget(dialog)
+
+    unlabeled = _find_unlabeled(dialog)
+    assert not unlabeled, f"Controls missing accessible names: {unlabeled}"
+
+
+def test_new_user_dialog_controls_have_accessible_names(qtbot):
+    dialog = NewUserDialog()
+    qtbot.addWidget(dialog)
+
+    unlabeled = _find_unlabeled(dialog)
+    assert not unlabeled, f"Controls missing accessible names: {unlabeled}"
+
+
+def test_new_group_dialog_controls_have_accessible_names(qtbot):
+    dialog = NewGroupDialog()
+    qtbot.addWidget(dialog)
+
+    unlabeled = _find_unlabeled(dialog)
+    assert not unlabeled, f"Controls missing accessible names: {unlabeled}"
+
+
+def test_edit_user_dialog_controls_have_accessible_names(qtbot):
+    detail = UserDetail(
+        id="u1",
+        display_name="Jane Doe",
+        job_title=None,
+        department=None,
+        office_location=None,
+        mobile_phone=None,
+        usage_location=None,
+    )
+    dialog = EditUserDialog(detail)
+    qtbot.addWidget(dialog)
+
+    unlabeled = _find_unlabeled(dialog)
+    assert not unlabeled, f"Controls missing accessible names: {unlabeled}"
+
+
+def test_reset_password_dialog_controls_have_accessible_names(qtbot):
+    dialog = ResetPasswordDialog("Jane Doe")
     qtbot.addWidget(dialog)
 
     unlabeled = _find_unlabeled(dialog)

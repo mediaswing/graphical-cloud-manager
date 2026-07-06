@@ -9,6 +9,40 @@ section below as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-06
+
+First release with real directory administration -- previous releases only
+had the app shell and placeholder pages.
+
+### Added
+- **Users**: list/search, create, edit profile fields (display name, job
+  title, department, office location, mobile phone, usage location), reset
+  password, enable/disable and delete with multi-select bulk actions.
+- **Groups**: list/search, create (Security or Microsoft 365), delete, and
+  manage membership (add/remove by UPN or object ID) via a members panel
+  next to the group list.
+- **Licensing**: tenant-wide subscribed-SKU consumption table, plus a
+  per-user license assignment panel (checklist of SKUs, applies add/remove
+  in one call to `assignLicense`). Warns if the user has no usage location
+  set, since Graph requires one before a license can be assigned.
+- **Roles (RBAC)**: list Entra directory role definitions (built-in and
+  custom), view who's assigned to a selected role, and assign/remove a
+  user's assignment. Intune and Exchange RBAC remain out of scope (different
+  permission models) -- see `docs/DESIGN.md` section 6.
+- Plain-language handling of authorization failures: every write action is
+  always offered regardless of the signed-in admin's actual role, and a 403
+  from Graph now surfaces as "you don't have permission to do this, it
+  typically requires role X" instead of a raw exception. This is deliberate
+  -- the app doesn't try to predict permissions client-side, since Graph
+  itself is the only reliable source of truth for what a given admin can do.
+
+### Notes
+- Group membership resolves a typed-in UPN to its object ID automatically;
+  role assignment currently supports user principals only (not groups or
+  service principals).
+- Dynamic membership rules, group-based licensing, and PIM-eligible (as
+  opposed to active) role assignments are not yet implemented.
+
 ## [0.1.2] - 2026-07-06
 
 ### Fixed
@@ -72,7 +106,8 @@ desktop app for administering Microsoft Entra, Intune, and Exchange.
   `http://localhost`) and set its Client ID / Tenant ID via **Tenant >
   Settings...** — see the README for step-by-step instructions.
 
-[Unreleased]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/mediaswing/graphical-cloud-manager/releases/tag/v0.1.0

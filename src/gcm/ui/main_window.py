@@ -29,6 +29,7 @@ from gcm.auth.auth_manager import AuthManager
 from gcm.config import load_config
 from gcm.graph.capabilities import TenantCapabilities, detect_capabilities
 from gcm.graph.client import build_graph_client
+from gcm.services.graph_errors import friendly_error_message
 from gcm.ui.login_dialog import LoginDialog
 from gcm.ui.pages.exchange_page import ExchangePage
 from gcm.ui.pages.groups_page import GroupsPage
@@ -53,6 +54,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Graphical Cloud Manager")
         self._auth_manager: AuthManager | None = None
+        self._graph_client = None
 
         self.nav_list = QListWidget()
         self.nav_list.setAccessibleName("Section navigation")
@@ -151,20 +153,26 @@ class MainWindow(QMainWindow):
             result = await loop.run_in_executor(None, auth_manager.sign_in_interactive)
         except Exception as exc:  # MSAL/network/config errors -- surface, don't crash
             self.set_connected(False)
-            QMessageBox.critical(self, "Sign-in failed", str(exc))
+            QMessageBox.critical(self, "Sign-in failed", friendly_error_message(exc))
             return
 
         self._auth_manager = auth_manager
         self.set_connected(True, result.account_username)
 
+        self._graph_client = build_graph_client(auth_manager)
+        self.users_page.set_graph_client(self._graph_client)
+        self.groups_page.set_graph_client(self._graph_client)
+        self.licensing_page.set_graph_client(self._graph_client)
+        self.roles_page.set_graph_client(self._graph_client)
+
         try:
-            graph_client = build_graph_client(auth_manager)
-            capabilities = await detect_capabilities(graph_client)
+            capabilities = await detect_capabilities(self._graph_client)
         except Exception as exc:
             QMessageBox.warning(
                 self,
                 "Capability detection failed",
-                f"Signed in, but couldn't determine which products this tenant has: {exc}",
+                "Signed in, but couldn't determine which products this tenant has: "
+                f"{friendly_error_message(exc)}",
             )
             capabilities = TenantCapabilities(has_intune=False, has_exchange=False)
         self.set_capabilities(capabilities)
@@ -173,6 +181,11 @@ class MainWindow(QMainWindow):
         if self._auth_manager is not None:
             self._auth_manager.sign_out()
             self._auth_manager = None
+        self._graph_client = None
+        self.users_page.set_graph_client(None)
+        self.groups_page.set_graph_client(None)
+        self.licensing_page.set_graph_client(None)
+        self.roles_page.set_graph_client(None)
         self.set_connected(False)
         self.set_capabilities(TenantCapabilities(has_intune=False, has_exchange=False))
 
@@ -180,7 +193,16 @@ class MainWindow(QMainWindow):
         for label, page_cls in _CORE_PAGES:
             item = QListWidgetItem(label)
             self.nav_list.addItem(item)
-            self.page_stack.addWidget(page_cls())
+            page = page_cls()
+            self.page_stack.addWidget(page)
+            if label == "Users":
+                self.users_page = page
+            elif label == "Groups":
+                self.groups_page = page
+            elif label == "Licensing":
+                self.licensing_page = page
+            elif label == "Roles (RBAC)":
+                self.roles_page = page
         self.nav_list.setCurrentRow(0)
 
     def set_capabilities(self, capabilities: TenantCapabilities) -> None:

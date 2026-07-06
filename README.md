@@ -6,7 +6,7 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture, tech stack rational
 
 ## Status
 
-Early scaffold: sign-in, capability detection, and the main window/navigation shell exist; the actual Users/Groups/Licensing/Roles/Intune/Exchange features are not yet implemented (see `docs/DESIGN.md` section 10 for the roadmap).
+Sign-in, capability detection, and the main window/navigation shell are in place. Users, Groups, Licensing, and Roles (Entra directory roles) are implemented against Microsoft Graph -- see `docs/DESIGN.md` section 6 for exactly what each covers. Intune and Exchange are still placeholder pages (see `docs/DESIGN.md` section 10 for the roadmap).
 
 ## Development setup
 

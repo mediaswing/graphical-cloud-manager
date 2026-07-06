@@ -87,14 +87,16 @@ On successful sign-in, the app calls `GET /subscribedSkus` and inspects `service
 
 ## 6. Feature modules (v1 scope)
 
-| Module | Status in v1 | Notes |
+| Module | Status | Notes |
 |---|---|---|
-| Users | Full | List/search/create/edit/disable/delete, bulk actions via multi-select |
-| Groups | Full | Security + M365 groups, membership management, dynamic membership rule editor |
-| Licensing | Full | View `subscribedSkus` consumption, assign/remove licenses per user, group-based licensing |
-| RBAC | Entra directory roles only | Built-in + custom role assignment, PIM-eligible assignments where licensed. Intune RBAC (scope tags) and Exchange RBAC (management role groups) are explicitly out of scope for v1 — different permission models, deferred to a later phase |
-| Intune | Present, basic | Device inventory, compliance state, basic remote actions (retire/wipe/sync). Only visible if capability detection finds Intune |
-| Exchange | Present, basic | Mailbox settings via Graph; mail flow rules/litigation hold via the optional PowerShell bridge. Only visible if capability detection finds Exchange Online |
+| Users | Implemented | List/search, create, edit profile fields (incl. `usageLocation`, needed before a license can be assigned), reset password, enable/disable and delete with multi-select bulk actions |
+| Groups | Implemented | Security + Microsoft 365 groups: list/search, create, delete, add/remove members by UPN or object ID. Dynamic membership rule editing is not yet implemented |
+| Licensing | Implemented | View `subscribedSkus` consumption tenant-wide; assign/remove licenses for a specific user via a checklist. Group-based licensing is not yet implemented |
+| RBAC | Entra directory roles only | List built-in + custom role definitions, view who's assigned to a role, assign/remove a user's assignment. PIM-eligible (as opposed to active) assignments are not yet implemented. Intune RBAC (scope tags) and Exchange RBAC (management role groups) are explicitly out of scope — different permission models, deferred to a later phase |
+| Intune | Not yet implemented | Placeholder page only; only visible if capability detection finds Intune |
+| Exchange | Not yet implemented | Placeholder page only; only visible if capability detection finds Exchange Online |
+
+Every write action can fail with an authorization error if the signed-in admin's actual directory role doesn't permit it — the app doesn't try to predict this client-side (Entra's real permission model is too nuanced to reliably mirror in the UI). Instead, `services/graph_errors.py` turns a Graph `Authorization_RequestDenied` (HTTP 403) response into a plain-language explanation shown in a dialog, rather than a raw exception. This is the deliberate "full administration if permissions allow" behavior: every action is always offered, and Graph itself is the source of truth for whether it's actually allowed.
 
 ## 7. Accessibility implementation strategy
 
@@ -134,11 +136,12 @@ src/gcm/
     user_service.py
     group_service.py
     license_service.py
-    rbac_service.py
+    role_service.py          # Entra directory roles only, see section 6
+    graph_errors.py           # ODataError -> plain-language message (esp. 403s)
     intune_service.py
     exchange_service.py
   config.py                # on-disk app config (tenant ID, client ID) -- see section 4a
-  models/                  # plain dataclasses shared by services + UI
+  models/                  # plain dataclasses shared by services + UI (user.py, group.py, license.py, role.py)
   ui/
     main_window.py
     login_dialog.py
