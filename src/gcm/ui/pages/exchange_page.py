@@ -395,7 +395,7 @@ class ExchangePage(QWidget):
         target_domain = target.split("@")[-1].lower() if "@" in target else ""
         external_warning = (
             f"\n\nThis domain ({target_domain}) is OUTSIDE your organization "
-            "({own_domain}) -- mail will leave your tenant."
+            f"({own_domain}) -- mail will leave your tenant."
             if target_domain and own_domain and target_domain != own_domain
             else ""
         )

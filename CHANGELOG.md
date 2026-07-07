@@ -9,6 +9,16 @@ section below as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-07
+
+### Fixed
+- **Exchange forwarding warning**: the confirmation dialog for setting up
+  mail forwarding to an external address was missing your own tenant domain
+  from its warning text due to a broken string (a missing `f`-prefix left
+  the placeholder unsubstituted). The warning now correctly names both the
+  external domain and your own, so this safety confirmation reads as
+  intended.
+
 ## [0.4.0] - 2026-07-07
 
 ### Added
@@ -229,7 +239,8 @@ desktop app for administering Microsoft Entra, Intune, and Exchange.
   `http://localhost`) and set its Client ID / Tenant ID via **Tenant >
   Settings...** — see the README for step-by-step instructions.
 
-[Unreleased]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mediaswing/graphical-cloud-manager/compare/v0.1.2...v0.2.0
