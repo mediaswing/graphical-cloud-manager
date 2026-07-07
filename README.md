@@ -42,3 +42,11 @@ Run tests (includes the automated accessibility audit described in `docs/DESIGN.
 ```bash
 pytest
 ```
+
+## Contributing
+
+Feature requests may be declined even if accompanied by an implementation.
+Pull requests are reviewed at the maintainer's discretion. AI-generated
+contributions must be understood and tested by the contributor. User-provided
+scripts, extensions and advanced functions are unsupported and used at the
+user's own risk.
