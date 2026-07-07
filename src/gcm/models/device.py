@@ -15,3 +15,4 @@ class DeviceSummary:
     is_managed: bool | None
     account_enabled: bool
     approximate_last_sign_in: datetime | None
+    azure_ad_device_id: str | None

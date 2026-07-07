@@ -228,6 +228,7 @@ class MainWindow(QMainWindow):
         """Add/remove the Intune/Exchange/Sign-in-logs nav entries based on
         what the connected tenant is actually licensed for."""
         self.users_page.set_has_audit_logs(capabilities.has_audit_logs)
+        self.devices_page.set_has_intune(capabilities.has_intune)
         self._remove_optional_page("Intune")
         self._remove_optional_page("Exchange")
         self._remove_optional_page("Sign-in logs")

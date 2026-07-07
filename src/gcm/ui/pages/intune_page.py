@@ -1,11 +1,15 @@
 """Intune page: read-only managed-device inventory.
 
-Deliberately read-only -- see gcm.services.intune_device_service's module
-docstring for why remote actions (wipe/retire/sync/restart) are
-out of scope here rather than just "not wired up yet". Only shown when
-tenant capability detection finds Intune (see graph/capabilities.py);
-missing permissions surface as a plain-language error via
-friendly_error_message rather than an empty table with no explanation.
+This page itself stays read-only -- Sync lives on the Devices page's
+right-click menu instead (see devices_page.py), since that's the only
+device list shown regardless of tenant capability, letting it show a clear
+error when a tenant lacks Intune rather than never being reachable at all.
+See gcm.services.intune_device_service's module docstring for why the
+remaining remote actions (wipe/retire/restart) are out of scope here rather
+than just "not wired up yet". This page is only shown when tenant
+capability detection finds Intune (see graph/capabilities.py); missing
+permissions surface as a plain-language error via friendly_error_message
+rather than an empty table with no explanation.
 """
 
 from __future__ import annotations
@@ -130,8 +134,9 @@ class IntunePage(QWidget):
         layout.addWidget(self.status_label)
 
         note = QLabel(
-            "Read-only device inventory. Remote actions (wipe, retire, sync, restart) "
-            "aren't available in this version."
+            "Read-only device inventory here. To sync a device with Intune, "
+            "right-click it on the Devices page. Other remote actions "
+            "(wipe, retire, restart) aren't available in this version."
         )
         note.setWordWrap(True)
         note.setAccessibleName("Intune read-only note")

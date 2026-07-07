@@ -17,6 +17,7 @@ from gcm.services.graph_errors import friendly_error_message
 
 _SELECT = [
     "id",
+    "deviceId",
     "displayName",
     "operatingSystem",
     "operatingSystemVersion",
@@ -88,4 +89,5 @@ def _to_summary(device: Device) -> DeviceSummary:
         is_managed=device.is_managed,
         account_enabled=bool(device.account_enabled),
         approximate_last_sign_in=device.approximate_last_sign_in_date_time,
+        azure_ad_device_id=device.device_id,
     )

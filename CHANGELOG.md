@@ -9,6 +9,20 @@ section below as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-07
+
+### Added
+- **Sync with Intune**: right-clicking a device on the Devices page now
+  offers a **Sync with Intune** action, asking Intune to check the device in
+  now. This is the first Intune remote action implemented -- deliberately
+  the least destructive one (fully reversible, no data loss), so it uses a
+  plain Yes/No confirmation rather than the impact-preview framework used
+  for delete/wipe-class actions. Offered from the Devices page (shown on
+  every tenant) rather than the Intune page (only shown when Intune is
+  licensed), so a tenant without Intune gets a clear "Intune not available"
+  message instead of the action being silently absent. Wipe, retire, and
+  restart remain out of scope.
+
 ## [0.4.1] - 2026-07-07
 
 ### Fixed

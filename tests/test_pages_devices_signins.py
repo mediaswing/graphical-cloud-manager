@@ -6,8 +6,11 @@ from __future__ import annotations
 
 import datetime
 
+import pytest
+
 from gcm.models.device import DeviceSummary
 from gcm.models.sign_in import SignInSummary
+from gcm.ui.pages import devices_page as devices_page_module
 from gcm.ui.pages.devices_page import DevicesPage, DevicesTableModel
 from gcm.ui.pages.sign_in_logs_page import SignInLogsPage, SignInLogsTableModel
 
@@ -26,6 +29,7 @@ def test_devices_table_model_renders_rows():
                 is_managed=True,
                 account_enabled=True,
                 approximate_last_sign_in=datetime.datetime(2026, 7, 1, 9, 30),
+                azure_ad_device_id="entra-device-guid",
             )
         ]
     )
@@ -50,6 +54,7 @@ def test_devices_table_model_handles_unknown_fields():
                 is_managed=None,
                 account_enabled=False,
                 approximate_last_sign_in=None,
+                azure_ad_device_id=None,
             )
         ]
     )
@@ -57,6 +62,62 @@ def test_devices_table_model_handles_unknown_fields():
     assert model.data(model.index(0, 3)) == "Unknown"
     assert model.data(model.index(0, 5)) == "Disabled"
     assert model.data(model.index(0, 6)) == "Never"
+
+
+def _device(id_="d1", display_name="Janes-MacBook", azure_ad_device_id="entra-device-guid"):
+    return DeviceSummary(
+        id=id_,
+        display_name=display_name,
+        operating_system="MacOS",
+        operating_system_version="15.0",
+        trust_type="AzureAd",
+        is_compliant=True,
+        is_managed=True,
+        account_enabled=True,
+        approximate_last_sign_in=None,
+        azure_ad_device_id=azure_ad_device_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_intune_shows_warning_when_tenant_has_no_intune(qtbot, monkeypatch):
+    page = DevicesPage()
+    qtbot.addWidget(page)
+    page._intune_service = object()  # must never be reached
+    page.set_has_intune(False)
+
+    warnings = []
+    monkeypatch.setattr(
+        devices_page_module.QMessageBox,
+        "warning",
+        lambda *a, **k: warnings.append((a, k)),
+    )
+
+    await page._on_sync_intune_clicked(_device())
+
+    assert len(warnings) == 1
+    assert "doesn't have Intune" in warnings[0][0][2]
+
+
+@pytest.mark.asyncio
+async def test_sync_intune_calls_service_when_tenant_has_intune(qtbot, monkeypatch):
+    page = DevicesPage()
+    qtbot.addWidget(page)
+    page.set_has_intune(True)
+
+    sync_calls = []
+
+    class FakeIntuneService:
+        async def sync_device_by_azure_ad_device_id(self, azure_ad_device_id, *, display_name=None):
+            sync_calls.append((azure_ad_device_id, display_name))
+
+    page._intune_service = FakeIntuneService()
+    monkeypatch.setattr(devices_page_module, "confirm_destructive", lambda *a, **k: True)
+
+    await page._on_sync_intune_clicked(_device())
+
+    assert sync_calls == [("entra-device-guid", "Janes-MacBook")]
+    assert "Sync requested" in page.status_label.text()
 
 
 def test_sign_in_logs_table_model_renders_rows():

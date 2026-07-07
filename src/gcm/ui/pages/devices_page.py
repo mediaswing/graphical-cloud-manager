@@ -3,13 +3,15 @@ data -- see gcm.services.device_service for why that's a separate module)."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPoint, Qt
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QTableView,
     QVBoxLayout,
@@ -20,6 +22,7 @@ from qasync import asyncSlot
 from gcm.models.device import DeviceSummary
 from gcm.services.device_service import DeviceService
 from gcm.services.graph_errors import friendly_error_message
+from gcm.services.intune_device_service import IntuneDeviceService
 from gcm.ui.widgets.accessible_button import AccessibleButton
 from gcm.ui.widgets.confirm import confirm_destructive
 from gcm.ui.widgets.csv_export_button import CsvExportButton
@@ -91,6 +94,8 @@ class DevicesPage(QWidget):
         super().__init__(parent)
         self.setAccessibleName("Devices")
         self._service: DeviceService | None = None
+        self._intune_service: IntuneDeviceService | None = None
+        self._has_intune = False
 
         layout = QVBoxLayout(self)
 
@@ -155,6 +160,8 @@ class DevicesPage(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setVisible(False)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_table_context_menu)
         layout.addWidget(self.table)
 
         self._set_controls_enabled(False)
@@ -175,6 +182,7 @@ class DevicesPage(QWidget):
     def set_graph_client(self, graph_client) -> None:
         if graph_client is None:
             self._service = None
+            self._intune_service = None
             self.model.set_devices([])
             self.status_label.setText(
                 "Sign in to a tenant (Tenant > Sign in...) to view devices."
@@ -182,8 +190,12 @@ class DevicesPage(QWidget):
             self._set_controls_enabled(False)
             return
         self._service = DeviceService(graph_client)
+        self._intune_service = IntuneDeviceService(graph_client)
         self._set_controls_enabled(True)
         self._on_refresh_clicked()
+
+    def set_has_intune(self, has_intune: bool) -> None:
+        self._has_intune = has_intune
 
     def _selected_devices(self) -> list[DeviceSummary]:
         rows = {index.row() for index in self.table.selectionModel().selectedRows()}
@@ -269,3 +281,45 @@ class DevicesPage(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "Couldn't delete device(s)", friendly_error_message(exc))
         await self._on_refresh_clicked()
+
+    def _on_table_context_menu(self, pos: QPoint) -> None:
+        if self._service is None:
+            return
+        index = self.table.indexAt(pos)
+        if not index.isValid():
+            return
+        self.table.selectionModel().select(
+            index,
+            QAbstractItemView.SelectionFlag.ClearAndSelect | QAbstractItemView.SelectionFlag.Rows,
+        )
+        device = self.model.device_at(index.row())
+
+        menu = QMenu(self)
+        sync_action = QAction("&Sync with Intune", self)
+        sync_action.triggered.connect(lambda: self._on_sync_intune_clicked(device))
+        menu.addAction(sync_action)
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    @asyncSlot()
+    async def _on_sync_intune_clicked(self, device: DeviceSummary) -> None:
+        if not self._has_intune:
+            QMessageBox.warning(
+                self,
+                "Intune not available",
+                "This tenant doesn't have Intune, so devices can't be synced.",
+            )
+            return
+        if self._intune_service is None:
+            return
+        if not confirm_destructive(
+            self, "Sync device", f"Ask Intune to sync {device.display_name} now?"
+        ):
+            return
+        try:
+            await self._intune_service.sync_device_by_azure_ad_device_id(
+                device.azure_ad_device_id or "", display_name=device.display_name
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Couldn't sync device", friendly_error_message(exc))
+            return
+        self.status_label.setText(f"Sync requested for {device.display_name}.")
