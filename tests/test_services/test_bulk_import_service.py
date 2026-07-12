@@ -156,11 +156,16 @@ class _FakeUserService:
 
 
 class _FakeGroupService:
-    def __init__(self, groups):
+    def __init__(self, groups, raise_on_list=False):
         self._groups = groups
+        self._raise_on_list = raise_on_list
         self.added = []
+        self.list_calls = 0
 
     async def list_groups(self):
+        self.list_calls += 1
+        if self._raise_on_list:
+            raise RuntimeError("tenant unreachable")
         return self._groups
 
     async def add_member(self, group_id, user_id, *, group_display_name=None):
@@ -168,22 +173,27 @@ class _FakeGroupService:
 
 
 class _FakeLicenseService:
-    def __init__(self, skus):
+    def __init__(self, skus, raise_on_list=False):
         self._skus = skus
+        self._raise_on_list = raise_on_list
         self.assigned = []
+        self.list_calls = 0
 
     async def list_subscribed_skus(self):
+        self.list_calls += 1
+        if self._raise_on_list:
+            raise RuntimeError("tenant unreachable")
         return self._skus
 
     async def set_user_licenses(self, user_id, *, add_sku_ids, remove_sku_ids, display_name=None):
         self.assigned.append((user_id, add_sku_ids, remove_sku_ids))
 
 
-def _make_service_with_fakes(existing_upns=(), skus=(), groups=()):
+def _make_service_with_fakes(existing_upns=(), skus=(), groups=(), raise_on_list=False):
     service = BulkImportService(graph_client=None)
     service._user_service = _FakeUserService(existing_upns)
-    service._group_service = _FakeGroupService(list(groups))
-    service._license_service = _FakeLicenseService(list(skus))
+    service._group_service = _FakeGroupService(list(groups), raise_on_list=raise_on_list)
+    service._license_service = _FakeLicenseService(list(skus), raise_on_list=raise_on_list)
     return service
 
 
@@ -284,3 +294,33 @@ def _raise_on_second_call(fn):
         return await fn(**kwargs)
 
     return wrapper
+
+
+@pytest.mark.asyncio
+async def test_execute_reuses_validate_against_tenants_sku_and_group_fetch():
+    service = _make_service_with_fakes(skus=[], groups=[])
+    rows = [_valid_row()]
+
+    await service.validate_against_tenant(rows)
+    await service.execute(rows)
+
+    # One call each, not one from validate + a second from execute for the
+    # same batch -- the whole point of caching across the two calls.
+    assert service._license_service.list_calls == 1
+    assert service._group_service.list_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_reports_not_attempted_when_tenant_lookup_fails():
+    # No validate_against_tenant call first, so execute() must do its own
+    # fetch -- and must not let that failure propagate uncaught (the caller,
+    # bulk_import_page._on_run_clicked, has no except clause around this).
+    service = _make_service_with_fakes(raise_on_list=True)
+    rows = [_valid_row(1, "a@contoso.com"), _valid_row(2, "b@contoso.com")]
+
+    results = await service.execute(rows)
+
+    assert len(results) == 2
+    assert all(r.success is False for r in results)
+    assert all("Not attempted" in r.message for r in results)
+    assert service._user_service.created == []

@@ -238,15 +238,21 @@ class BulkImportPage(QWidget):
         self._update_run_cancel_state()
         self.status_label.setText(f"Validating {len(rows)} row(s) against the tenant...")
 
+        validation_note = ""
         try:
             await self._service.validate_against_tenant(rows)
         except Exception as exc:
-            self.status_label.setText(f"Couldn't fully validate against the tenant: {exc}")
+            # Don't just show this and move on -- the very next lines used to
+            # unconditionally overwrite it with the generic "loaded" message
+            # before anyone could read it, hiding that per-row tenant checks
+            # (existing user/group/SKU lookups) were skipped entirely.
+            validation_note = f" Couldn't fully validate against the tenant: {exc}"
         self.model.set_rows(rows)  # re-set to refresh error/warning text after tenant checks
 
         blocked = sum(1 for r in rows if not r.is_valid)
         self.status_label.setText(
-            f"{len(rows)} row(s) loaded: {len(rows) - blocked} ready, {blocked} blocked."
+            f"{len(rows)} row(s) loaded: {len(rows) - blocked} ready, "
+            f"{blocked} blocked.{validation_note}"
         )
         self._update_run_cancel_state()
 

@@ -11,6 +11,7 @@ from msgraph.generated.users.item.user_item_request_builder import UserItemReque
 from msgraph.generated.users.users_request_builder import UsersRequestBuilder
 
 from gcm.graph.pagination import collect_all
+from gcm.graph.search import escape_search_term
 from gcm.models.user import UserDetail, UserSummary
 from gcm.services import audit_log
 from gcm.services.graph_errors import friendly_error_message
@@ -40,7 +41,8 @@ class UserService:
             # $search requires ConsistencyLevel: eventual, and (per Graph's
             # advanced-query rules) can't be combined with $orderby, which we
             # don't use here anyway.
-            query_params.search = f'"displayName:{search}" OR "userPrincipalName:{search}"'
+            term = escape_search_term(search)
+            query_params.search = f'"displayName:{term}" OR "userPrincipalName:{term}"'
             query_params.count = True
             request_config.headers.add("ConsistencyLevel", "eventual")
         first_page = await self._graph.users.get(request_configuration=request_config)

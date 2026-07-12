@@ -17,6 +17,7 @@ from msgraph.generated.users.item.user_item_request_builder import (
 )
 
 from gcm.graph.pagination import collect_all
+from gcm.graph.search import escape_search_term
 from gcm.models.group import DynamicMembershipInfo, GroupMember, GroupSummary
 from gcm.services import audit_log
 from gcm.services.graph_errors import friendly_error_message
@@ -37,7 +38,7 @@ class GroupService:
         )
         request_config = RequestConfiguration(query_parameters=query_params)
         if search:
-            query_params.search = f'"displayName:{search}"'
+            query_params.search = f'"displayName:{escape_search_term(search)}"'
             query_params.count = True
             request_config.headers.add("ConsistencyLevel", "eventual")
         first_page = await self._graph.groups.get(request_configuration=request_config)

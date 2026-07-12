@@ -63,6 +63,12 @@ class ImpactPreviewDialog(QDialog):
         layout.addWidget(groups_label)
 
         roles_text = ", ".join(preview.admin_role_names) if preview.admin_role_names else "none"
+        if preview.member_of_truncated:
+            # Groups and admin directory roles come from the same capped
+            # memberOf call (see impact_preview.py), so a truncated page can
+            # just as easily be hiding an admin role as a group -- an admin
+            # role appearing empty here must not be read as "confirmed none".
+            roles_text += " (and more not shown)"
         roles_label = QLabel(f"Administrative roles: {roles_text}")
         roles_label.setWordWrap(True)
         roles_label.setAccessibleName("Target administrative roles")

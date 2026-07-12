@@ -11,6 +11,7 @@ from msgraph.generated.devices.devices_request_builder import DevicesRequestBuil
 from msgraph.generated.models.device import Device
 
 from gcm.graph.pagination import collect_all
+from gcm.graph.search import escape_search_term
 from gcm.models.device import DeviceSummary
 from gcm.services import audit_log
 from gcm.services.graph_errors import friendly_error_message
@@ -39,7 +40,7 @@ class DeviceService:
         )
         request_config = RequestConfiguration(query_parameters=query_params)
         if search:
-            query_params.search = f'"displayName:{search}"'
+            query_params.search = f'"displayName:{escape_search_term(search)}"'
             query_params.count = True
             request_config.headers.add("ConsistencyLevel", "eventual")
         first_page = await self._graph.devices.get(request_configuration=request_config)

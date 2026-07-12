@@ -143,6 +143,10 @@ class GroupsPage(QWidget):
         self.setAccessibleName("Groups")
         self._service: GroupService | None = None
         self._selected_group: GroupSummary | None = None
+        # Bumped on every refresh; a completed request only applies its
+        # result if it's still the most recent one issued, so a slow broad
+        # search can't overwrite a faster, more recent narrow one.
+        self._refresh_generation = 0
 
         layout = QVBoxLayout(self)
 
@@ -299,12 +303,18 @@ class GroupsPage(QWidget):
     async def _on_refresh_clicked(self) -> None:
         if self._service is None:
             return
+        self._refresh_generation += 1
+        generation = self._refresh_generation
         self.status_label.setText("Loading groups...")
         try:
             groups = await self._service.list_groups(self.search_edit.text().strip() or None)
         except Exception as exc:
+            if generation != self._refresh_generation:
+                return  # superseded by a newer refresh; don't show a stale error
             self.status_label.setText(f"Couldn't load groups: {friendly_error_message(exc)}")
             return
+        if generation != self._refresh_generation:
+            return  # a newer refresh already started; don't clobber it with this stale result
         self.model.set_groups(groups)
         self.status_label.setText(f"{len(groups)} group(s).")
 
@@ -397,7 +407,14 @@ class GroupsPage(QWidget):
         try:
             members = await self._service.list_members(group.id)
         except Exception as exc:
+            if self._selected_group is not group:
+                return  # a different group was selected before this failed
             self.members_label.setText(f"Couldn't load members: {friendly_error_message(exc)}")
+            return
+        if self._selected_group is not group:
+            # The admin selected a different group while this was in flight;
+            # applying it now would show group B's members/label under a
+            # selection that's actually on group A.
             return
         self.members_list.clear()
         for member in members:

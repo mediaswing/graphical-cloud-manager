@@ -4,7 +4,10 @@ dataclasses directly."""
 
 from __future__ import annotations
 
+import pytest
+
 from gcm.models.bulk_import import ImportRow, ImportRowResult
+from gcm.ui.pages import bulk_import_page as bulk_import_page_module
 from gcm.ui.pages.bulk_import_page import BulkImportPage, BulkImportTableModel
 
 
@@ -94,3 +97,34 @@ def test_bulk_import_page_run_button_enabled_with_a_valid_row(qtbot):
     page._update_run_cancel_state()
 
     assert page.run_button.isEnabled()
+
+
+@pytest.mark.asyncio
+async def test_choose_file_keeps_tenant_validation_error_visible(qtbot, monkeypatch, tmp_path):
+    """A failed tenant-validation pass used to flash its error message for a
+    moment before the very next lines unconditionally overwrote it with the
+    generic "N row(s) loaded" summary -- hiding that per-row checks (existing
+    user/SKU/group lookups) never actually ran."""
+    page = BulkImportPage()
+    qtbot.addWidget(page)
+
+    csv_path = tmp_path / "import.csv"
+    csv_path.write_text("display_name,user_principal_name,mail_nickname,password\n")
+    monkeypatch.setattr(
+        bulk_import_page_module.QFileDialog, "getOpenFileName",
+        staticmethod(lambda *a, **k: (str(csv_path), "")))
+
+    class FakeService:
+        def parse_and_validate_locally(self, path):
+            return [_row()]
+
+        async def validate_against_tenant(self, rows):
+            raise RuntimeError("tenant unreachable")
+
+    page._service = FakeService()
+
+    await page._on_choose_file_clicked()
+
+    text = page.status_label.text()
+    assert "1 row(s) loaded" in text
+    assert "Couldn't fully validate against the tenant" in text

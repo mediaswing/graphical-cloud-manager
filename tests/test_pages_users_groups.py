@@ -4,10 +4,12 @@ dataclasses directly and checks the page's pre-sign-in state."""
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from PySide6.QtCore import Qt
 
-from gcm.models.group import GroupSummary
+from gcm.models.group import GroupMember, GroupSummary
 from gcm.models.user import UserSummary
 from gcm.services.impact_preview import ImpactPreview
 from gcm.ui.pages import users_page as users_page_module
@@ -222,3 +224,111 @@ async def test_impact_preview_falls_back_to_plain_confirm_when_preview_build_fai
 
     assert result is False
     assert "Couldn't load impact preview" in confirm_messages[0][1]
+
+
+@pytest.mark.asyncio
+async def test_stale_refresh_does_not_clobber_a_newer_one(qtbot):
+    """A slow broad search (e.g. one letter) that's still in flight when the
+    admin refines it to a fast, narrow one must not overwrite the narrow
+    result once it eventually completes."""
+    page = UsersPage()
+    qtbot.addWidget(page)
+
+    slow_release = asyncio.Event()
+
+    class FakeService:
+        async def list_users(self, search):
+            if search == "slow":
+                await slow_release.wait()
+                return [_user(display_name="StaleResult")]
+            return [_user(display_name="FreshResult")]
+
+    page._service = FakeService()
+
+    page.search_edit.setText("slow")
+    stale_task = page._on_refresh_clicked()
+    await asyncio.sleep(0)  # let it reach the await inside list_users
+
+    page.search_edit.setText("fresh")
+    await page._on_refresh_clicked()
+    assert [u.display_name for u in page.model.all_users()] == ["FreshResult"]
+
+    slow_release.set()
+    await stale_task
+
+    assert [u.display_name for u in page.model.all_users()] == ["FreshResult"]
+
+
+@pytest.mark.asyncio
+async def test_stale_member_refresh_does_not_clobber_a_different_selection(qtbot):
+    """Selecting group A (slow member fetch) then quickly selecting group B
+    (fast fetch) must leave B's members displayed, not have A's slow
+    response land afterwards and silently overwrite them."""
+    page = GroupsPage()
+    qtbot.addWidget(page)
+
+    group_a = GroupSummary(id="a", display_name="Group A", mail=None, group_type="Security")
+    group_b = GroupSummary(id="b", display_name="Group B", mail=None, group_type="Security")
+    slow_release = asyncio.Event()
+
+    class FakeService:
+        async def list_members(self, group_id):
+            if group_id == "a":
+                await slow_release.wait()
+                return [GroupMember(id="1", display_name="Alice")]
+            return [GroupMember(id="2", display_name="Bob")]
+
+    page._service = FakeService()
+
+    page._selected_group = group_a
+    stale_task = page._refresh_members()
+    await asyncio.sleep(0)  # let it reach the await inside list_members
+
+    page._selected_group = group_b
+    await page._refresh_members()
+    assert [page.members_list.item(i).text() for i in range(page.members_list.count())] == ["Bob"]
+
+    slow_release.set()
+    await stale_task
+
+    assert [page.members_list.item(i).text() for i in range(page.members_list.count())] == ["Bob"]
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_continues_past_a_failure_and_reports_it(qtbot, monkeypatch):
+    """One user failing to delete must not abort the rest of the selection,
+    and the resulting message must say what succeeded vs failed."""
+    page = UsersPage()
+    qtbot.addWidget(page)
+    users = [_user(id_="u1", display_name="Good1"),
+             _user(id_="u2", display_name="Bad"),
+             _user(id_="u3", display_name="Good2")]
+    page.model.set_users(users)
+    page.table.selectAll()
+
+    deleted = []
+
+    class FakeService:
+        async def delete_user(self, user_id, *, display_name=None):
+            if user_id == "u2":
+                raise RuntimeError("locked")
+            deleted.append(user_id)
+
+        async def list_users(self, search=None):
+            return []
+
+    page._service = FakeService()
+    monkeypatch.setattr(users_page_module, "confirm_destructive", lambda *a, **k: True)
+
+    critical_calls = []
+    monkeypatch.setattr(
+        users_page_module.QMessageBox, "critical",
+        lambda *a, **k: critical_calls.append(a))
+
+    await page._on_delete_clicked()
+
+    assert deleted == ["u1", "u3"]  # both good ones still attempted despite u2 failing
+    assert len(critical_calls) == 1
+    message = critical_calls[0][2]
+    assert "2 of 3 succeeded" in message
+    assert "Bad" in message

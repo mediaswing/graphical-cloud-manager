@@ -32,5 +32,12 @@ class KeyringTokenCache(SerializableTokenCache):
     def clear(self) -> None:
         try:
             keyring.delete_password(_SERVICE_NAME, self._profile_name)
-        except keyring.errors.PasswordDeleteError:
+        except keyring.errors.KeyringError:
+            # Covers PasswordDeleteError (nothing to delete) as well as
+            # backend-level failures (a locked keychain, a Secret Service
+            # dbus timeout, a Credential Manager API error, ...). By the time
+            # this runs, sign_out() has already removed the account from
+            # MSAL's in-memory cache -- failing to also scrub the persisted
+            # blob is a lesser problem than propagating and leaving the
+            # caller's UI in a torn "still shows connected" state over it.
             pass

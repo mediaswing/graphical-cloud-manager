@@ -24,6 +24,7 @@ from gcm.services.device_service import DeviceService
 from gcm.services.graph_errors import friendly_error_message
 from gcm.services.intune_device_service import IntuneDeviceService
 from gcm.ui.widgets.accessible_button import AccessibleButton
+from gcm.ui.widgets.bulk_action import run_bulk_action, summarize_bulk_failures
 from gcm.ui.widgets.confirm import confirm_destructive
 from gcm.ui.widgets.csv_export_button import CsvExportButton
 
@@ -34,6 +35,23 @@ def _yes_no_unknown(value: bool | None) -> str:
     if value is None:
         return "Unknown"
     return "Yes" if value else "No"
+
+
+def _device_context_note(device: DeviceSummary) -> str:
+    """A one-line compliance/activity summary for a single-device confirm
+    prompt -- built entirely from fields the page already has in memory (no
+    extra Graph call), same bounded-cost spirit as the Users impact preview,
+    so an admin isn't asked to delete/disable a compliant, recently-active
+    device with zero visibility into that."""
+    last_sign_in = (
+        device.approximate_last_sign_in.date().isoformat()
+        if device.approximate_last_sign_in else "never recorded"
+    )
+    return (
+        f"Compliant: {_yes_no_unknown(device.is_compliant)}. "
+        f"Managed: {_yes_no_unknown(device.is_managed)}. "
+        f"Last sign-in: {last_sign_in}."
+    )
 
 
 class DevicesTableModel(QAbstractTableModel):
@@ -96,6 +114,10 @@ class DevicesPage(QWidget):
         self._service: DeviceService | None = None
         self._intune_service: IntuneDeviceService | None = None
         self._has_intune = False
+        # Bumped on every refresh; a completed request only applies its
+        # result if it's still the most recent one issued, so a slow broad
+        # search can't overwrite a faster, more recent narrow one.
+        self._refresh_generation = 0
 
         layout = QVBoxLayout(self)
 
@@ -229,12 +251,18 @@ class DevicesPage(QWidget):
     async def _on_refresh_clicked(self) -> None:
         if self._service is None:
             return
+        self._refresh_generation += 1
+        generation = self._refresh_generation
         self.status_label.setText("Loading devices...")
         try:
             devices = await self._service.list_devices(self.search_edit.text().strip() or None)
         except Exception as exc:
+            if generation != self._refresh_generation:
+                return  # superseded by a newer refresh; don't show a stale error
             self.status_label.setText(f"Couldn't load devices: {friendly_error_message(exc)}")
             return
+        if generation != self._refresh_generation:
+            return  # a newer refresh already started; don't clobber it with this stale result
         self.model.set_devices(devices)
         self.status_label.setText(f"{len(devices)} device(s).")
 
@@ -244,6 +272,20 @@ class DevicesPage(QWidget):
 
     @asyncSlot()
     async def _on_disable_clicked(self) -> None:
+        if self._service is None:
+            return
+        devices = self._selected_devices()
+        if not devices:
+            self.status_label.setText("Select at least one device first.")
+            return
+        if len(devices) == 1:
+            message = (f"Disable {devices[0].display_name}? It will not be able to sign in. "
+                      f"{_device_context_note(devices[0])}")
+        else:
+            names = ", ".join(device.display_name for device in devices)
+            message = f"Disable {names}? They will not be able to sign in."
+        if not confirm_destructive(self, "Disable device(s)", message):
+            return
         await self._set_selected_enabled(False)
 
     async def _set_selected_enabled(self, enabled: bool) -> None:
@@ -253,13 +295,16 @@ class DevicesPage(QWidget):
         if not devices:
             self.status_label.setText("Select at least one device first.")
             return
-        try:
-            for device in devices:
-                await self._service.set_device_enabled(
-                    device.id, enabled, display_name=device.display_name
-                )
-        except Exception as exc:
-            QMessageBox.critical(self, "Couldn't update device(s)", friendly_error_message(exc))
+        succeeded, failures = await run_bulk_action(
+            devices,
+            lambda device: self._service.set_device_enabled(
+                device.id, enabled, display_name=device.display_name),
+            display_name=lambda device: device.display_name,
+        )
+        if failures:
+            QMessageBox.critical(
+                self, "Couldn't update device(s)",
+                summarize_bulk_failures(len(devices), succeeded, failures))
         await self._on_refresh_clicked()
 
     @asyncSlot()
@@ -270,16 +315,23 @@ class DevicesPage(QWidget):
         if not devices:
             self.status_label.setText("Select at least one device first.")
             return
-        names = ", ".join(device.display_name for device in devices)
-        if not confirm_destructive(
-            self, "Delete device(s)", f"Permanently delete {names}? This cannot be undone."
-        ):
+        if len(devices) == 1:
+            message = (f"Permanently delete {devices[0].display_name}? This cannot be undone. "
+                      f"{_device_context_note(devices[0])}")
+        else:
+            names = ", ".join(device.display_name for device in devices)
+            message = f"Permanently delete {names}? This cannot be undone."
+        if not confirm_destructive(self, "Delete device(s)", message):
             return
-        try:
-            for device in devices:
-                await self._service.delete_device(device.id, display_name=device.display_name)
-        except Exception as exc:
-            QMessageBox.critical(self, "Couldn't delete device(s)", friendly_error_message(exc))
+        succeeded, failures = await run_bulk_action(
+            devices,
+            lambda device: self._service.delete_device(device.id, display_name=device.display_name),
+            display_name=lambda device: device.display_name,
+        )
+        if failures:
+            QMessageBox.critical(
+                self, "Couldn't delete device(s)",
+                summarize_bulk_failures(len(devices), succeeded, failures))
         await self._on_refresh_clicked()
 
     def _on_table_context_menu(self, pos: QPoint) -> None:

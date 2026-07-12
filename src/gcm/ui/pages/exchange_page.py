@@ -391,14 +391,26 @@ class ExchangePage(QWidget):
         if not target:
             self.status_label.setText("Enter a forwarding destination address first.")
             return
-        own_domain = (self._loaded_display_name or "").split("@")[-1].lower()
         target_domain = target.split("@")[-1].lower() if "@" in target else ""
-        external_warning = (
-            f"\n\nThis domain ({target_domain}) is OUTSIDE your organization "
-            f"({own_domain}) -- mail will leave your tenant."
-            if target_domain and own_domain and target_domain != own_domain
-            else ""
-        )
+        external_warning = ""
+        if target_domain:
+            try:
+                verified_domains = await self._service.list_verified_domain_names()
+            except Exception:
+                verified_domains = None
+            if verified_domains is not None:
+                is_external = target_domain not in verified_domains
+            else:
+                # Couldn't check the tenant's actual domain list -- fall back
+                # to the older, narrower heuristic rather than skipping the
+                # warning outright.
+                own_domain = (self._loaded_display_name or "").split("@")[-1].lower()
+                is_external = bool(own_domain) and target_domain != own_domain
+            if is_external:
+                external_warning = (
+                    f"\n\nThis domain ({target_domain}) is OUTSIDE your organization "
+                    f"-- mail will leave your tenant."
+                )
         keep_copy = self.keep_copy_check.isChecked()
         if not confirm_destructive(
             self,

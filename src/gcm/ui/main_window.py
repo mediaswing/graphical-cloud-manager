@@ -178,8 +178,15 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # Block a second concurrent sign-in attempt (e.g. the menu action
+        # clicked again, or via its shortcut) while this one's interactive
+        # MSAL flow is still awaiting -- two at once could race to assign
+        # self._auth_manager/self._graph_client, leaving pages wired to
+        # whichever finished last while audit_log's actor doesn't match.
+        self.sign_in_action.setEnabled(False)
         dialog = LoginDialog(self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
+            self.sign_in_action.setEnabled(True)
             return
         profile_name = dialog.profile_name() or "default"
 
@@ -221,18 +228,24 @@ class MainWindow(QMainWindow):
         self.set_capabilities(capabilities)
 
     def _on_sign_out_triggered(self) -> None:
-        if self._auth_manager is not None:
-            self._auth_manager.sign_out()
+        try:
+            if self._auth_manager is not None:
+                self._auth_manager.sign_out()
+        finally:
+            # However sign_out() goes, the UI must not end up in a torn
+            # state that still claims to be connected to a signed-out
+            # account -- clear our side unconditionally.
             self._auth_manager = None
-        self._graph_client = None
-        self.users_page.set_graph_client(None)
-        self.groups_page.set_graph_client(None)
-        self.devices_page.set_graph_client(None)
-        self.licensing_page.set_graph_client(None)
-        self.roles_page.set_graph_client(None)
-        self.bulk_import_page.set_graph_client(None)
-        self.set_connected(False)
-        self.set_capabilities(TenantCapabilities(has_intune=False, has_exchange=False, has_audit_logs=False))
+            self._graph_client = None
+            self.users_page.set_graph_client(None)
+            self.groups_page.set_graph_client(None)
+            self.devices_page.set_graph_client(None)
+            self.licensing_page.set_graph_client(None)
+            self.roles_page.set_graph_client(None)
+            self.bulk_import_page.set_graph_client(None)
+            self.set_connected(False)
+            self.set_capabilities(
+                TenantCapabilities(has_intune=False, has_exchange=False, has_audit_logs=False))
 
     # -- auto-update ------------------------------------------------------- #
     @asyncSlot()

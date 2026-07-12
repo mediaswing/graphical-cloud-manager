@@ -54,6 +54,13 @@ class BulkImportService:
         self._user_service = UserService(graph_client)
         self._group_service = GroupService(graph_client)
         self._license_service = LicenseService(graph_client)
+        # Populated by validate_against_tenant (always refetched there, so a
+        # newly chosen file always sees current tenant state) and reused by
+        # execute() a moment later for the same batch, instead of paying for
+        # the same two tenant-wide list calls twice right before the
+        # bulk-create burst starts.
+        self._skus_cache = None
+        self._groups_cache = None
 
     def parse_and_validate_locally(self, path: str) -> list[ImportRow]:
         """Synchronous and network-free -- call via `loop.run_in_executor`
@@ -81,10 +88,10 @@ class BulkImportService:
         self, rows: list[ImportRow], *, concurrency: int = _DEFAULT_CONCURRENCY
     ) -> None:
         """Mutates `rows` in place, adding errors/warnings."""
-        skus = await self._license_service.list_subscribed_skus()
-        sku_by_part_number = {s.sku_part_number.upper() for s in skus}
-        groups = await self._group_service.list_groups()
-        group_by_name = {g.display_name.lower() for g in groups}
+        self._skus_cache = await self._license_service.list_subscribed_skus()
+        self._groups_cache = await self._group_service.list_groups()
+        sku_by_part_number = {s.sku_part_number.upper() for s in self._skus_cache}
+        group_by_name = {g.display_name.lower() for g in self._groups_cache}
 
         for row in rows:
             for sku_name in row.license_sku_part_numbers:
@@ -123,9 +130,31 @@ class BulkImportService:
     async def execute(
         self, rows: list[ImportRow], *, concurrency: int = _DEFAULT_CONCURRENCY
     ) -> list[ImportRowResult]:
-        skus = await self._license_service.list_subscribed_skus()
+        # Reuse validate_against_tenant's fetch when it already ran for this
+        # batch (the normal flow); only hit the network here if execute() is
+        # ever called on its own. Either way, a failure here must not
+        # propagate uncaught -- the caller (bulk_import_page._on_run_clicked)
+        # has no except clause around this call, so an unhandled exception
+        # here would leave the UI stuck on "Running import..." forever with
+        # no indication anything went wrong.
+        try:
+            skus = self._skus_cache
+            if skus is None:
+                skus = await self._license_service.list_subscribed_skus()
+            groups = self._groups_cache
+            if groups is None:
+                groups = await self._group_service.list_groups()
+        except Exception as exc:
+            return [
+                ImportRowResult(
+                    row.row_number, row.display_name, row.user_principal_name,
+                    success=False,
+                    message=f"Not attempted: couldn't look up tenant SKUs/groups: "
+                            f"{friendly_error_message(exc)}",
+                )
+                for row in rows
+            ]
         sku_id_by_part_number = {s.sku_part_number.upper(): s.sku_id for s in skus}
-        groups = await self._group_service.list_groups()
         group_id_by_name = {g.display_name.lower(): g.id for g in groups}
 
         semaphore = asyncio.Semaphore(concurrency)

@@ -38,6 +38,16 @@ _COLUMNS = [
 ]
 
 
+def _format_user_column(device: IntuneDeviceSummary) -> str:
+    """Shared by the table model and the CSV export so a device with no
+    assigned user, or a UPN but no display name, reads the same in both
+    instead of "(none)" on screen and a bare "()" in the exported file."""
+    if device.user_display_name:
+        upn_part = f" ({device.user_principal_name})" if device.user_principal_name else ""
+        return f"{device.user_display_name}{upn_part}"
+    return device.user_principal_name or "(none)"
+
+
 class IntuneDevicesTableModel(QAbstractTableModel):
     def __init__(self) -> None:
         super().__init__()
@@ -88,10 +98,7 @@ class IntuneDevicesTableModel(QAbstractTableModel):
         if column == 0:
             return device.device_name
         if column == 1:
-            if device.user_display_name:
-                upn_part = f" ({device.user_principal_name})" if device.user_principal_name else ""
-                return f"{device.user_display_name}{upn_part}"
-            return device.user_principal_name or "(none)"
+            return _format_user_column(device)
         if column == 2:
             os_name = device.operating_system or "Unknown"
             os_version = f" {device.os_version}" if device.os_version else ""
@@ -221,7 +228,7 @@ class IntunePage(QWidget):
             rows.append(
                 [
                     d.device_name,
-                    f"{d.user_display_name or ''} ({d.user_principal_name or ''})".strip(),
+                    _format_user_column(d),
                     f"{os_name}{os_version}",
                     d.compliance_state or "Unknown",
                     d.management_state or "Unknown",

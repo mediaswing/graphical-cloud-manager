@@ -45,6 +45,19 @@ def test_dialog_shows_licenses_and_groups(qtbot):
     assert "Enabled" in _label_text(dialog, "Target account status")
 
 
+def test_truncated_member_of_flags_admin_roles_too(qtbot):
+    # Groups and admin roles come from the same capped memberOf call, so a
+    # truncated page could just as easily be hiding an admin role as a group
+    # -- an empty roles list must not read as "confirmed none" in that case.
+    dialog = ImpactPreviewDialog(
+        "Delete user", "Delete this user?",
+        _preview(admin_role_names=[], member_of_truncated=True))
+    qtbot.addWidget(dialog)
+
+    assert "and more not shown" in _label_text(dialog, "Target group memberships")
+    assert "and more not shown" in _label_text(dialog, "Target administrative roles")
+
+
 def test_dialog_shows_not_checked_disclosure(qtbot):
     dialog = ImpactPreviewDialog("Delete user", "Delete this user?", _preview())
     qtbot.addWidget(dialog)

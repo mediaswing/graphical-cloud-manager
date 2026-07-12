@@ -24,6 +24,7 @@ from gcm.services.graph_errors import friendly_error_message
 from gcm.services.impact_preview import build_user_impact_preview
 from gcm.services.user_service import UserService
 from gcm.ui.widgets.accessible_button import AccessibleButton
+from gcm.ui.widgets.bulk_action import run_bulk_action, summarize_bulk_failures
 from gcm.ui.widgets.confirm import confirm_destructive
 from gcm.ui.widgets.csv_export_button import CsvExportButton
 from gcm.ui.widgets.impact_preview_dialog import ImpactPreviewDialog
@@ -268,6 +269,10 @@ class UsersPage(QWidget):
         self._service: UserService | None = None
         self._graph_client = None
         self._has_audit_logs = False
+        # Bumped on every refresh; a completed request only applies its
+        # result if it's still the most recent one issued, so a slow
+        # broad search can't overwrite a faster, more recent narrow one.
+        self._refresh_generation = 0
 
         layout = QVBoxLayout(self)
 
@@ -401,12 +406,18 @@ class UsersPage(QWidget):
     async def _on_refresh_clicked(self) -> None:
         if self._service is None:
             return
+        self._refresh_generation += 1
+        generation = self._refresh_generation
         self.status_label.setText("Loading users...")
         try:
             users = await self._service.list_users(self.search_edit.text().strip() or None)
         except Exception as exc:
+            if generation != self._refresh_generation:
+                return  # superseded by a newer refresh; don't show a stale error
             self.status_label.setText(f"Couldn't load users: {friendly_error_message(exc)}")
             return
+        if generation != self._refresh_generation:
+            return  # a newer refresh already started; don't clobber it with this stale result
         self.model.set_users(users)
         self.status_label.setText(f"{len(users)} user(s).")
 
@@ -478,13 +489,16 @@ class UsersPage(QWidget):
         if not users:
             self.status_label.setText("Select at least one user first.")
             return
-        try:
-            for user in users:
-                await self._service.set_account_enabled(
-                    user.id, enabled, display_name=user.display_name
-                )
-        except Exception as exc:
-            QMessageBox.critical(self, "Couldn't update user(s)", friendly_error_message(exc))
+        succeeded, failures = await run_bulk_action(
+            users,
+            lambda user: self._service.set_account_enabled(
+                user.id, enabled, display_name=user.display_name),
+            display_name=lambda user: user.display_name,
+        )
+        if failures:
+            QMessageBox.critical(
+                self, "Couldn't update user(s)",
+                summarize_bulk_failures(len(users), succeeded, failures))
         await self._on_refresh_clicked()
 
     @asyncSlot()
@@ -504,13 +518,16 @@ class UsersPage(QWidget):
             require_typed_confirmation=False,
         ):
             return
-        try:
-            for user in users:
-                await self._service.set_account_enabled(
-                    user.id, False, display_name=user.display_name
-                )
-        except Exception as exc:
-            QMessageBox.critical(self, "Couldn't disable user(s)", friendly_error_message(exc))
+        succeeded, failures = await run_bulk_action(
+            users,
+            lambda user: self._service.set_account_enabled(
+                user.id, False, display_name=user.display_name),
+            display_name=lambda user: user.display_name,
+        )
+        if failures:
+            QMessageBox.critical(
+                self, "Couldn't disable user(s)",
+                summarize_bulk_failures(len(users), succeeded, failures))
         await self._on_refresh_clicked()
 
     @asyncSlot()
@@ -527,11 +544,15 @@ class UsersPage(QWidget):
             require_typed_confirmation=True,
         ):
             return
-        try:
-            for user in users:
-                await self._service.delete_user(user.id, display_name=user.display_name)
-        except Exception as exc:
-            QMessageBox.critical(self, "Couldn't delete user(s)", friendly_error_message(exc))
+        succeeded, failures = await run_bulk_action(
+            users,
+            lambda user: self._service.delete_user(user.id, display_name=user.display_name),
+            display_name=lambda user: user.display_name,
+        )
+        if failures:
+            QMessageBox.critical(
+                self, "Couldn't delete user(s)",
+                summarize_bulk_failures(len(users), succeeded, failures))
         await self._on_refresh_clicked()
 
     async def _confirm_with_impact_preview(

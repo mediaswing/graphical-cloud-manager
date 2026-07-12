@@ -19,6 +19,8 @@ def test_exchange_page_starts_disconnected_and_disabled(qtbot):
 
 
 class _FakeMailboxService:
+    verified_domains = {"contoso.com", "contoso.onmicrosoft.com"}
+
     async def get_aliases(self, user_id):
         return AliasesSummary(user_id=user_id, primary_address="jane@contoso.com", aliases=["alias@contoso.com"])
 
@@ -29,6 +31,12 @@ class _FakeMailboxService:
 
     async def get_forwarding_rule(self, user_id):
         return ForwardingRuleSummary(exists=True, target_address="ext@example.com", keep_copy=False)
+
+    async def set_forwarding_rule(self, user_id, target, *, keep_copy, display_name=None):
+        pass
+
+    async def list_verified_domain_names(self):
+        return self.verified_domains
 
 
 @pytest.mark.asyncio
@@ -65,3 +73,51 @@ async def test_load_shows_no_forwarding_rule_message(qtbot):
     await page._on_load_clicked()
 
     assert "No rule-based forwarding" in page.forwarding_status_label.text()
+
+
+async def _prepare_forwarding_save(qtbot, monkeypatch, target, service=None):
+    from gcm.ui.pages import exchange_page as exchange_page_module
+
+    page = ExchangePage()
+    qtbot.addWidget(page)
+    page._service = service or _FakeMailboxService()
+    page._set_tab_controls_enabled(True)
+    page.user_edit.setText("jane@contoso.com")
+    await page._on_load_clicked()
+    page.forward_target_edit.setText(target)
+
+    confirm_messages = []
+    monkeypatch.setattr(
+        exchange_page_module, "confirm_destructive",
+        lambda parent, title, message: confirm_messages.append(message) or False)
+
+    await page._on_save_forwarding_clicked()
+    return confirm_messages[0] if confirm_messages else ""
+
+
+@pytest.mark.asyncio
+async def test_forwarding_to_a_second_verified_domain_does_not_warn(qtbot, monkeypatch):
+    # contoso.onmicrosoft.com is a different domain than the loaded mailbox's
+    # own (contoso.com) but is equally internal -- must not read as external.
+    message = await _prepare_forwarding_save(qtbot, monkeypatch, "ops@contoso.onmicrosoft.com")
+    assert "OUTSIDE your organization" not in message
+
+
+@pytest.mark.asyncio
+async def test_forwarding_to_an_unverified_domain_warns(qtbot, monkeypatch):
+    message = await _prepare_forwarding_save(qtbot, monkeypatch, "ext@example.com")
+    assert "OUTSIDE your organization" in message
+    assert "example.com" in message
+
+
+@pytest.mark.asyncio
+async def test_forwarding_falls_back_to_own_domain_when_verified_domains_unavailable(qtbot, monkeypatch):
+    class _NoDomainsService(_FakeMailboxService):
+        async def list_verified_domain_names(self):
+            raise RuntimeError("no permission")
+
+    # Own domain (contoso.com) vs a different one: the fallback heuristic
+    # should still flag it, same as the pre-fix behavior.
+    message = await _prepare_forwarding_save(
+        qtbot, monkeypatch, "ext@example.com", service=_NoDomainsService())
+    assert "OUTSIDE your organization" in message

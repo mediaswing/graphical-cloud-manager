@@ -96,8 +96,13 @@ def record(
 
 
 def _trim_if_needed(path: Path) -> None:
+    """Rewriting the whole file is O(n); only doing it right at the cap would
+    mean paying that cost on every single write once the log is full. Instead,
+    let it grow a batch past the cap before trimming back down to exactly
+    _MAX_ENTRIES, amortizing the rewrite over that whole batch of writes."""
+    batch = max(1, _MAX_ENTRIES // 10)
     lines = path.read_text(encoding="utf-8").splitlines()
-    if len(lines) > _MAX_ENTRIES:
+    if len(lines) > _MAX_ENTRIES + batch:
         path.write_text("\n".join(lines[-_MAX_ENTRIES:]) + "\n", encoding="utf-8")
 
 

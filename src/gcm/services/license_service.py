@@ -26,6 +26,7 @@ from msgraph.generated.users.item.assign_license.assign_license_post_request_bod
 )
 from msgraph.generated.users.item.user_item_request_builder import UserItemRequestBuilder
 
+from gcm.graph.pagination import collect_all
 from gcm.models.license import ServicePlanSummary, SubscribedSkuSummary, UserLicenseAssignment
 from gcm.services import audit_log
 from gcm.services.graph_errors import friendly_error_message
@@ -36,8 +37,9 @@ class LicenseService:
         self._graph = graph_client
 
     async def list_subscribed_skus(self) -> list[SubscribedSkuSummary]:
-        result = await self._graph.subscribed_skus.get()
-        return [_to_summary(sku) for sku in (result.value or [])]
+        first_page = await self._graph.subscribed_skus.get()
+        skus = await collect_all(first_page, self._graph.request_adapter)
+        return [_to_summary(sku) for sku in skus]
 
     async def get_user_license_sku_ids(self, user_id: str) -> set[str]:
         query_params = UserItemRequestBuilder.UserItemRequestBuilderGetQueryParameters(

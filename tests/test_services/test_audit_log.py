@@ -83,3 +83,20 @@ def test_entries_are_capped_at_max_size(tmp_path, monkeypatch):
     assert len(entries) == 3
     # the oldest entries are dropped, not the newest
     assert [e.target_id for e in entries] == ["2", "3", "4"]
+
+
+def test_trim_is_batched_not_rewritten_on_every_write_past_the_cap(tmp_path, monkeypatch):
+    """Rewriting the whole file is wasted work if it happens on every single
+    write once the log is full; _trim_if_needed should let it grow a batch
+    past the cap before paying for one rewrite, not immediately snap back to
+    exactly _MAX_ENTRIES on the very next write."""
+    log_path = tmp_path / "audit.jsonl"
+    monkeypatch.setenv("GCM_AUDIT_LOG_PATH", str(log_path))
+    monkeypatch.setattr(audit_log, "_MAX_ENTRIES", 10)  # batch = max(1, 10//10) = 1
+
+    for i in range(11):  # one past the cap: not yet past cap + batch (11)
+        audit_log.record("action", "User", str(i), f"User {i}", result="success")
+    assert len(log_path.read_text().splitlines()) == 11  # not trimmed yet
+
+    audit_log.record("action", "User", "11", "User 11", result="success")
+    assert len(log_path.read_text().splitlines()) == 10  # now trimmed to the cap

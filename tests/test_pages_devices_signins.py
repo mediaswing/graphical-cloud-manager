@@ -120,6 +120,98 @@ async def test_sync_intune_calls_service_when_tenant_has_intune(qtbot, monkeypat
     assert "Sync requested" in page.status_label.text()
 
 
+@pytest.mark.asyncio
+async def test_delete_confirmation_includes_compliance_context_for_single_device(qtbot, monkeypatch):
+    page = DevicesPage()
+    qtbot.addWidget(page)
+    device = _device()
+    page.model.set_devices([device])
+    page.table.selectRow(0)
+
+    class FakeService:
+        async def delete_device(self, device_id, *, display_name=None):
+            pass
+
+    page._service = FakeService()
+
+    calls = []
+    monkeypatch.setattr(
+        devices_page_module, "confirm_destructive",
+        lambda parent, title, message: calls.append(message) or False)
+
+    await page._on_delete_clicked()
+
+    assert len(calls) == 1
+    assert "Compliant: Yes" in calls[0]
+    assert "Managed: Yes" in calls[0]
+
+
+@pytest.mark.asyncio
+async def test_disable_requires_confirmation(qtbot, monkeypatch):
+    """Disabling a device locks it out -- like Delete, it must ask first,
+    not go straight to the service call."""
+    page = DevicesPage()
+    qtbot.addWidget(page)
+    page.model.set_devices([_device()])
+    page.table.selectRow(0)
+
+    calls = []
+
+    class FakeService:
+        async def set_device_enabled(self, device_id, enabled, *, display_name=None):
+            calls.append((device_id, enabled))
+
+        async def list_devices(self, search=None):
+            return []
+
+    page._service = FakeService()
+    monkeypatch.setattr(devices_page_module, "confirm_destructive", lambda *a, **k: False)
+
+    await page._on_disable_clicked()
+
+    assert calls == []  # declined the confirmation -- service must not be called
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_continues_past_a_failure_and_reports_it(qtbot, monkeypatch):
+    """One device failing to delete must not abort the rest of the
+    selection, and the resulting message must say what succeeded vs failed."""
+    page = DevicesPage()
+    qtbot.addWidget(page)
+    devices = [_device(id_="d1", display_name="Good1"),
+               _device(id_="d2", display_name="Bad"),
+               _device(id_="d3", display_name="Good2")]
+    page.model.set_devices(devices)
+    page.table.selectAll()
+
+    deleted = []
+
+    class FakeService:
+        async def delete_device(self, device_id, *, display_name=None):
+            if device_id == "d2":
+                raise RuntimeError("locked")
+            deleted.append(device_id)
+
+        async def list_devices(self, search=None):
+            return []
+
+    page._service = FakeService()
+    monkeypatch.setattr(devices_page_module, "confirm_destructive", lambda *a, **k: True)
+
+    critical_calls = []
+    monkeypatch.setattr(
+        devices_page_module.QMessageBox, "critical",
+        lambda *a, **k: critical_calls.append(a))
+
+    await page._on_delete_clicked()
+
+    assert deleted == ["d1", "d3"]  # both good ones still attempted despite d2 failing
+    assert len(critical_calls) == 1
+    message = critical_calls[0][2]
+    assert "2 of 3 succeeded" in message
+    assert "Bad" in message
+
+
 def test_sign_in_logs_table_model_renders_rows():
     model = SignInLogsTableModel()
     model.set_sign_ins(

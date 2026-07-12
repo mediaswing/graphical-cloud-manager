@@ -7,7 +7,7 @@ from __future__ import annotations
 import datetime
 
 from gcm.models.intune_device import IntuneDeviceSummary
-from gcm.ui.pages.intune_page import IntuneDevicesTableModel, IntunePage
+from gcm.ui.pages.intune_page import IntuneDevicesTableModel, IntunePage, _format_user_column
 
 
 def _device(name="Janes-iPhone", user_display_name="Jane Doe", user_principal_name="jane@contoso.com"):
@@ -49,6 +49,21 @@ def test_table_model_handles_missing_fields():
     assert model.data(model.index(0, 1)) == "(none)"
     assert model.data(model.index(0, 3)) == "Unknown"
     assert model.data(model.index(0, 6)) == "Never"
+
+
+def test_format_user_column_matches_between_table_and_csv_export():
+    """_format_user_column is shared by the table model's column 1 and the
+    CSV export's user column specifically so they can't drift apart -- the
+    table used to show "(none)"/a bare UPN while the CSV independently
+    rendered "()"/a parenthesized UPN for the same rows."""
+    no_user = _device(user_display_name=None, user_principal_name=None)
+    assert _format_user_column(no_user) == "(none)"
+
+    upn_only = _device(user_display_name=None, user_principal_name="jane@contoso.com")
+    assert _format_user_column(upn_only) == "jane@contoso.com"
+
+    both = _device(user_display_name="Jane Doe", user_principal_name="jane@contoso.com")
+    assert _format_user_column(both) == "Jane Doe (jane@contoso.com)"
 
 
 def test_filter_matches_device_name():

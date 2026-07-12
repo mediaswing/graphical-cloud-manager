@@ -68,6 +68,7 @@ class _FakeMessageRulesBuilder:
 
         result = _Result()
         result.value = self._rules
+        result.odata_next_link = ""
         return result
 
     async def post(self, body):
@@ -131,6 +132,7 @@ class _FakeGraphClient:
         mail_folders_builder = _FakeMailFoldersBuilder(message_rules_builder)
         self.users = _FakeUsersBuilder(user_item_builder, mail_folders_builder)
         self.reports = _FakeReportsBuilder(csv_bytes)
+        self.request_adapter = None  # unused: these fakes never have a next page
         self._user_item_builder = user_item_builder
         self._message_rules_builder = message_rules_builder
 

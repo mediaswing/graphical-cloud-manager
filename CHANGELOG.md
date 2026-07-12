@@ -9,6 +9,54 @@ section below as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-07-12
+
+### Fixed
+- Users/Groups/Devices search: a term containing a literal `"` broke the
+  Graph `$search` query instead of being escaped.
+- Graph throttling (429) now surfaces as a clear "try again" message
+  (including the `Retry-After` delay when Graph provides one) instead of a
+  raw error body.
+- `list_subscribed_skus` and the forwarding-rule lookup now page through
+  every result instead of silently stopping at the first page.
+- The local audit log rewrote its entire file on every single write once
+  past the 5,000-entry cap, instead of just occasionally; it's now batched.
+- The impact-preview dialog's "not all shown" caveat was only applied to
+  the group-memberships line, not administrative roles -- both come from
+  the same capped lookup, so a truncated page could hide an admin role
+  just as easily as a group.
+- Users/Groups/Devices: a slower, broader search or a stale member-list
+  fetch could land after a faster, more recent one and silently overwrite
+  it; refreshes now discard results that have been superseded.
+- Deleting or disabling a device showed only a bare confirmation with no
+  compliance/activity context (unlike the equivalent Users flow), and
+  Disable had no confirmation step at all.
+- Bulk enable/disable/delete (Users and Devices) aborted the whole batch on
+  the first row that failed, silently skipping the rest of the selection;
+  every row is now attempted, and the result reports exactly what
+  succeeded and what didn't.
+- Bulk import: a failed tenant-validation pass showed its error for a
+  moment before the very next lines unconditionally overwrote it; the
+  upfront SKU/group lookup in `execute()` could raise uncaught, leaving the
+  UI stuck on "Running import..." with no explanation; and `execute()` no
+  longer re-fetches the same SKU/group lists `validate_against_tenant()`
+  just fetched for the same batch.
+- Intune page: the CSV export's "User" column was hand-duplicated from the
+  table's formatting and rendered differently for missing/partial user
+  info (e.g. `()` instead of the table's `(none)`).
+- Exchange forwarding: an external-domain warning used a naive
+  string comparison instead of the tenant's actual verified domains, so
+  forwarding between two of the tenant's own domains (e.g.
+  `contoso.com` and `contoso.onmicrosoft.com`) was wrongly flagged as
+  leaving the organization.
+- A second concurrent sign-in attempt (while the first's interactive
+  browser flow was still open) could race to assign the active auth
+  session; the Sign in action is now disabled for the duration of one
+  attempt.
+- Sign-out no longer leaves the UI in a torn "still connected" state if
+  clearing the persisted token cache fails for a reason beyond "nothing to
+  delete".
+
 ## [0.6.1] - 2026-07-12
 
 ### Fixed

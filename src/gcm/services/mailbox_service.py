@@ -40,6 +40,7 @@ from msgraph.generated.models.recipient import Recipient
 from msgraph.generated.models.user import User
 from msgraph.generated.users.item.user_item_request_builder import UserItemRequestBuilder
 
+from gcm.graph.pagination import collect_all
 from gcm.models.mailbox import (
     AliasesSummary,
     AutomaticRepliesSummary,
@@ -61,6 +62,19 @@ _AUDIENCE_TO_ENUM = {
 class MailboxService:
     def __init__(self, graph_client: GraphServiceClient) -> None:
         self._graph = graph_client
+
+    # -- Tenant domains ---------------------------------------------------------
+
+    async def list_verified_domain_names(self) -> set[str]:
+        """Lowercased domain names verified for this tenant. A tenant
+        routinely has more than one (e.g. contoso.com and its default
+        contoso.onmicrosoft.com), all equally internal -- a forwarding
+        target's domain needs checking against this whole set, not just
+        whichever domain the loaded mailbox happens to use, or two internal
+        domains would wrongly warn "leaving your tenant" against each other."""
+        result = await self._graph.domains.get()
+        domains = result.value if result else []
+        return {d.id.lower() for d in domains if d.id}
 
     # -- Aliases (proxyAddresses) ---------------------------------------------
 
@@ -249,10 +263,11 @@ class MailboxService:
         )
 
     async def _find_forwarding_rule(self, user_id: str) -> MessageRule | None:
-        result = await self._graph.users.by_user_id(user_id).mail_folders.by_mail_folder_id(
+        first_page = await self._graph.users.by_user_id(user_id).mail_folders.by_mail_folder_id(
             "inbox"
         ).message_rules.get()
-        for rule in result.value or []:
+        rules = await collect_all(first_page, self._graph.request_adapter)
+        for rule in rules:
             if rule.display_name == _FORWARDING_RULE_NAME:
                 return rule
         return None
