@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import webbrowser
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QDialog,
@@ -59,6 +59,23 @@ _CORE_PAGES = [
     ("Bulk import", BulkImportPage),
     ("Audit log", AuditLogPage),
 ]
+
+
+class _UncancellableProgressDialog(QProgressDialog):
+    """A QProgressDialog for an operation that can't safely be interrupted
+    once started (self-replacing the running executable). setCancelButton(None)
+    alone only hides the button -- QProgressDialog still treats Escape (and the
+    window's close button) as cancel/close, which would mislead the user into
+    thinking they'd stopped something that's still running in the background."""
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            event.ignore()
+            return
+        super().keyPressEvent(event)
+
+    def closeEvent(self, event) -> None:
+        event.ignore()
 
 
 class MainWindow(QMainWindow):
@@ -220,10 +237,27 @@ class MainWindow(QMainWindow):
     # -- auto-update ------------------------------------------------------- #
     @asyncSlot()
     async def _check_for_updates(self, interactive: bool = False) -> None:
-        loop = asyncio.get_event_loop()
-        release = await loop.run_in_executor(None, updater.check_latest_release, __version__)
+        if getattr(self, "_update_busy", False):
+            if interactive:
+                QMessageBox.information(
+                    self, "Check for Updates",
+                    "An update check is already in progress.")
+            return
+        self._update_busy = True
+        try:
+            loop = asyncio.get_event_loop()
+            release = await loop.run_in_executor(
+                None, updater.check_latest_release, __version__)
+        except Exception as exc:  # noqa: BLE001 - surface any failure
+            self._update_busy = False
+            if interactive:
+                QMessageBox.critical(
+                    self, "Check for Updates",
+                    f"Couldn't check for updates: {friendly_error_message(exc)}")
+            return
 
         if release is None:
+            self._update_busy = False
             if interactive:
                 QMessageBox.information(
                     self, "Check for Updates",
@@ -237,9 +271,11 @@ class MainWindow(QMainWindow):
             f"{notes}\n\nUpdate now?",
         )
         if reply != QMessageBox.StandardButton.Yes:
+            self._update_busy = False
             return
 
         if not updater.is_frozen():
+            self._update_busy = False
             QMessageBox.information(
                 self, "Update available",
                 "Running from source, so this build can't update itself.\n\n"
@@ -248,6 +284,7 @@ class MainWindow(QMainWindow):
             return
 
         if not release.asset_url:
+            self._update_busy = False
             QMessageBox.critical(
                 self, "Update available",
                 "No download is available for this platform yet.\n\n"
@@ -258,9 +295,13 @@ class MainWindow(QMainWindow):
         await self._start_self_update(release)
 
     async def _start_self_update(self, release) -> None:
-        progress = QProgressDialog(
+        # There is no safe way to cancel mid-self-replace, so refuse Escape
+        # and the window close button rather than let the user think they
+        # stopped something that's still running in the background.
+        progress = _UncancellableProgressDialog(
             f"Downloading version {release.version}...", None, 0, 0, self)
         progress.setWindowTitle("Updating...")
+        progress.setAccessibleName("Update download progress")
         progress.setCancelButton(None)
         progress.setMinimumDuration(0)
         progress.show()
@@ -271,6 +312,7 @@ class MainWindow(QMainWindow):
             # returns here when it works, so the process just quits mid-await.
             await loop.run_in_executor(None, updater.perform_self_update, release)
         except Exception as exc:  # noqa: BLE001 - surface any failure
+            self._update_busy = False
             progress.close()
             QMessageBox.critical(
                 self, "Update failed",

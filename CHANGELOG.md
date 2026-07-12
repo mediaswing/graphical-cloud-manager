@@ -9,6 +9,41 @@ section below as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-07-12
+
+### Fixed
+- **Windows self-update silently failed to install**: the updater's log file
+  lived inside the install folder it was about to rename aside, so the move
+  that placed the new build was skipped entirely once that folder no longer
+  existed under its old name — leaving the old build renamed to `.bak` and
+  nothing in its place. The log now lives outside the install folder, and
+  the update script checks each step and aborts cleanly (leaving the `.bak`
+  intact) instead of silently continuing.
+- The startup update check and the Help > Check for Updates action could
+  run concurrently with nothing to stop it, so two self-updates could race
+  to replace the same install directory; a check now refuses to start a
+  second one while one is already in progress.
+- The update-progress dialog could be dismissed via Escape or the window's
+  close button without actually stopping the in-flight update, misleading
+  the user into thinking they'd cancelled something that was still running
+  in the background (there is no safe way to cancel mid-replace, so the
+  dialog now refuses to close).
+- A manual "Check for Updates..." could silently do nothing if the check
+  raised an unexpected error; it's now caught and reported.
+- `parse_version` mis-parsed pre-release tags like `1.2.3-rc1` as `1.2.31`
+  instead of `1.2.3`.
+- The update-download step now rejects zip entries that would extract
+  outside the target folder, and the macOS `.app` bundle path is resolved
+  by walking up to the nearest `.app` ancestor instead of a fragile string
+  split (which could pick the wrong directory on an unusual install path).
+- Every Graph API call was silently redeeming a fresh access token over the
+  network instead of reusing the one cached at sign-in (a scope mismatch
+  between the two), and that MSAL call ran synchronously on the UI thread --
+  freezing the whole app for the round trip on every single request, and
+  for as long as an interactive re-sign-in took on a cache miss. Token
+  acquisition is now properly asynchronous and reuses the same scopes sign-in
+  cached the token under.
+
 ## [0.6.0] - 2026-07-12
 
 ### Added

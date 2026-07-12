@@ -7,6 +7,7 @@ from __future__ import annotations
 import io
 import json
 import urllib.error
+import zipfile
 
 from gcm.services import updater
 
@@ -106,3 +107,35 @@ def test_network_error_returns_none(monkeypatch):
 
     monkeypatch.setattr(updater.urllib.request, "urlopen", _raise)
     assert updater.check_latest_release("0.5.0") is None
+
+
+def test_parse_version_drops_prerelease_suffix_instead_of_merging_digits():
+    assert updater.parse_version("v1.2.3-rc1") == (1, 2, 3)
+
+
+def test_compare_versions_pads_shorter_tuple():
+    assert updater._compare_versions((1, 3), (1, 3, 0)) == 0
+    assert updater._compare_versions((1, 3, 0), (1, 3)) == 0
+    assert updater._compare_versions((1, 3, 1), (1, 3)) == 1
+    assert updater._compare_versions((1, 2), (1, 3)) == -1
+
+
+def test_safe_extract_extracts_normal_archive(tmp_path):
+    zip_path = tmp_path / "update.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("GraphicalCloudManager/file.txt", "hello")
+    dest = tmp_path / "out"
+    updater._safe_extract(str(zip_path), str(dest))
+    assert (dest / "GraphicalCloudManager" / "file.txt").read_text() == "hello"
+
+
+def test_safe_extract_rejects_path_traversal_entry(tmp_path):
+    zip_path = tmp_path / "evil.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("../../evil.txt", "pwned")
+    dest = tmp_path / "out"
+    try:
+        updater._safe_extract(str(zip_path), str(dest))
+        assert False, "expected OSError"
+    except OSError:
+        pass

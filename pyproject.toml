@@ -1,6 +1,6 @@
 [project]
 name = "gcm"
-version = "0.6.0"
+version = "0.6.1"
 description = "Graphical Cloud Manager: an accessible, cross-platform GUI for Microsoft Entra, Intune, and Exchange administration"
 readme = "README.md"
 requires-python = ">=3.11"
