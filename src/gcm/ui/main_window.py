@@ -9,7 +9,9 @@ break screen-reader row announcements (see docs/DESIGN.md section 7).
 from __future__ import annotations
 
 import asyncio
+import webbrowser
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QDialog,
@@ -18,6 +20,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QProgressDialog,
     QSplitter,
     QStackedWidget,
     QStatusBar,
@@ -25,11 +28,12 @@ from PySide6.QtWidgets import (
 )
 from qasync import asyncSlot
 
+from gcm import __version__
 from gcm.auth.auth_manager import AuthManager
 from gcm.config import load_config
 from gcm.graph.capabilities import TenantCapabilities, detect_capabilities
 from gcm.graph.client import build_graph_client
-from gcm.services import audit_log
+from gcm.services import audit_log, updater
 from gcm.services.graph_errors import friendly_error_message
 from gcm.ui.login_dialog import LoginDialog
 from gcm.ui.pages.audit_log_page import AuditLogPage
@@ -93,6 +97,11 @@ class MainWindow(QMainWindow):
         self.set_capabilities(TenantCapabilities(has_intune=False, has_exchange=False, has_audit_logs=False))
         self.set_connected(False)
 
+        # Silent background check a couple seconds after startup; failures
+        # and "already up to date" are only shown when triggered manually via
+        # Help > Check for Updates.
+        QTimer.singleShot(2000, lambda: self._check_for_updates(interactive=False))
+
     def _make_status_label(self) -> QLabel:
         label = QLabel("Not connected")
         label.setAccessibleName("Connection status")
@@ -131,6 +140,12 @@ class MainWindow(QMainWindow):
         exit_action = app_menu.addAction("E&xit")
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
+
+        help_menu = menu_bar.addMenu("&Help")
+        check_updates_action = help_menu.addAction("Check for &Updates...")
+        check_updates_action.setMenuRole(QAction.MenuRole.NoRole)
+        check_updates_action.triggered.connect(
+            lambda: self._check_for_updates(interactive=True))
 
     def _on_settings_triggered(self) -> None:
         SettingsDialog(self).exec()
@@ -201,6 +216,68 @@ class MainWindow(QMainWindow):
         self.bulk_import_page.set_graph_client(None)
         self.set_connected(False)
         self.set_capabilities(TenantCapabilities(has_intune=False, has_exchange=False, has_audit_logs=False))
+
+    # -- auto-update ------------------------------------------------------- #
+    @asyncSlot()
+    async def _check_for_updates(self, interactive: bool = False) -> None:
+        loop = asyncio.get_event_loop()
+        release = await loop.run_in_executor(None, updater.check_latest_release, __version__)
+
+        if release is None:
+            if interactive:
+                QMessageBox.information(
+                    self, "Check for Updates",
+                    f"You're up to date (version {__version__}).")
+            return
+
+        notes = release.notes or "No release notes provided."
+        reply = QMessageBox.question(
+            self, "Update available",
+            f"Version {release.version} is available (you have {__version__}).\n\n"
+            f"{notes}\n\nUpdate now?",
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        if not updater.is_frozen():
+            QMessageBox.information(
+                self, "Update available",
+                "Running from source, so this build can't update itself.\n\n"
+                "Opening the release page in your browser...")
+            webbrowser.open(updater.RELEASES_PAGE_URL)
+            return
+
+        if not release.asset_url:
+            QMessageBox.critical(
+                self, "Update available",
+                "No download is available for this platform yet.\n\n"
+                "Opening the release page in your browser...")
+            webbrowser.open(updater.RELEASES_PAGE_URL)
+            return
+
+        await self._start_self_update(release)
+
+    async def _start_self_update(self, release) -> None:
+        progress = QProgressDialog(
+            f"Downloading version {release.version}...", None, 0, 0, self)
+        progress.setWindowTitle("Updating...")
+        progress.setCancelButton(None)
+        progress.setMinimumDuration(0)
+        progress.show()
+
+        loop = asyncio.get_event_loop()
+        try:
+            # perform_self_update calls os._exit(0) on success -- it never
+            # returns here when it works, so the process just quits mid-await.
+            await loop.run_in_executor(None, updater.perform_self_update, release)
+        except Exception as exc:  # noqa: BLE001 - surface any failure
+            progress.close()
+            QMessageBox.critical(
+                self, "Update failed",
+                f"Couldn't install the update: {friendly_error_message(exc)}\n\n"
+                "Opening the release page in your browser so you can download "
+                "it manually...")
+            webbrowser.open(updater.RELEASES_PAGE_URL)
 
     def _add_core_pages(self) -> None:
         for label, page_cls in _CORE_PAGES:
