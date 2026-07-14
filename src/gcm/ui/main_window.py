@@ -11,8 +11,8 @@ from __future__ import annotations
 import asyncio
 import webbrowser
 
-from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QTimer, QUrl, Qt
+from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import (
     QDialog,
     QLabel,
@@ -30,16 +30,26 @@ from qasync import asyncSlot
 
 from gcm import __version__
 from gcm.auth.auth_manager import AuthManager
-from gcm.config import load_config
+from gcm.auth.google_auth_manager import GoogleAuthManager
+from gcm.config import error_log_path, load_config, load_google_config
+from gcm.google.client import build_directory_client, build_reports_client
 from gcm.graph.capabilities import TenantCapabilities, detect_capabilities
 from gcm.graph.client import build_graph_client
 from gcm.services import audit_log, updater
+from gcm.services.error_log import log_asyncio_exception
 from gcm.services.graph_errors import friendly_error_message
+from gcm.ui.google_settings_dialog import GoogleSettingsDialog
 from gcm.ui.login_dialog import LoginDialog
 from gcm.ui.pages.audit_log_page import AuditLogPage
 from gcm.ui.pages.bulk_import_page import BulkImportPage
 from gcm.ui.pages.devices_page import DevicesPage
 from gcm.ui.pages.exchange_page import ExchangePage
+from gcm.ui.pages.google_admin_audit_page import GoogleAdminAuditPage
+from gcm.ui.pages.google_devices_page import GoogleDevicesPage
+from gcm.ui.pages.google_groups_page import GoogleGroupsPage
+from gcm.ui.pages.google_mailbox_page import GoogleMailboxPage
+from gcm.ui.pages.google_sign_in_logs_page import GoogleSignInLogsPage
+from gcm.ui.pages.google_users_page import GoogleUsersPage
 from gcm.ui.pages.groups_page import GroupsPage
 from gcm.ui.pages.intune_page import IntunePage
 from gcm.ui.pages.licensing_page import LicensingPage
@@ -58,6 +68,19 @@ _CORE_PAGES = [
     ("Roles (RBAC)", RolesPage),
     ("Bulk import", BulkImportPage),
     ("Audit log", AuditLogPage),
+]
+
+# Always-present Google Workspace pages -- added alongside _CORE_PAGES at
+# startup (not dynamically shown/hidden on Google sign-in/out) so they
+# behave the same as the Microsoft core pages: visible immediately, showing
+# an empty "sign in to view" state until set_directory_client(...) is called.
+_GOOGLE_PAGES = [
+    ("Google Users", GoogleUsersPage),
+    ("Google Groups", GoogleGroupsPage),
+    ("Google Devices", GoogleDevicesPage),
+    ("Google Mailbox", GoogleMailboxPage),
+    ("Google Sign-in logs", GoogleSignInLogsPage),
+    ("Google Admin audit log", GoogleAdminAuditPage),
 ]
 
 
@@ -84,6 +107,13 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Graphical Cloud Manager")
         self._auth_manager: AuthManager | None = None
         self._graph_client = None
+        self._google_auth_manager: GoogleAuthManager | None = None
+        self._directory_client = None
+        self._reports_client = None
+        # Reused across calls rather than creating a new QMessageBox per
+        # exception, so a burst of background failures updates one visible
+        # notification instead of piling up separate windows.
+        self._error_notice_box: QMessageBox | None = None
 
         self.nav_list = QListWidget()
         self.nav_list.setAccessibleName("Section navigation")
@@ -109,10 +139,15 @@ class MainWindow(QMainWindow):
         self.setStatusBar(status_bar)
         self.connection_label = self._make_status_label()
         status_bar.addWidget(self.connection_label)
+        self.google_connection_label = self._make_status_label()
+        self.google_connection_label.setAccessibleName("Google Workspace connection status")
+        status_bar.addWidget(self.google_connection_label)
 
         self._add_core_pages()
+        self._add_google_pages()
         self.set_capabilities(TenantCapabilities(has_intune=False, has_exchange=False, has_audit_logs=False))
         self.set_connected(False)
+        self.set_google_connected(False)
 
         # Silent background check a couple seconds after startup; failures
         # and "already up to date" are only shown when triggered manually via
@@ -158,11 +193,38 @@ class MainWindow(QMainWindow):
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
 
+        google_menu = menu_bar.addMenu("&Google Workspace")
+
+        self.google_settings_action = google_menu.addAction("&Settings...")
+        self.google_settings_action.setMenuRole(QAction.MenuRole.NoRole)
+        self.google_settings_action.triggered.connect(self._on_google_settings_triggered)
+
+        self.google_sign_in_action = google_menu.addAction("Sign &in...")
+        self.google_sign_in_action.setMenuRole(QAction.MenuRole.NoRole)
+        self.google_sign_in_action.triggered.connect(self._on_google_sign_in_triggered)
+
+        self.google_sign_out_action = google_menu.addAction("Sign &out")
+        self.google_sign_out_action.setMenuRole(QAction.MenuRole.NoRole)
+        self.google_sign_out_action.setEnabled(False)
+        self.google_sign_out_action.triggered.connect(self._on_google_sign_out_triggered)
+
         help_menu = menu_bar.addMenu("&Help")
         check_updates_action = help_menu.addAction("Check for &Updates...")
         check_updates_action.setMenuRole(QAction.MenuRole.NoRole)
         check_updates_action.triggered.connect(
             lambda: self._check_for_updates(interactive=True))
+
+        open_error_log_action = help_menu.addAction("Open &Error Log")
+        open_error_log_action.setMenuRole(QAction.MenuRole.NoRole)
+        open_error_log_action.triggered.connect(self._on_open_error_log_triggered)
+
+    def _on_open_error_log_triggered(self) -> None:
+        path = error_log_path()
+        # Nothing's been logged yet if the file doesn't exist -- open its
+        # parent folder instead of an error dialog about a missing file, so
+        # this is never wrong to click, just sometimes empty.
+        target = path if path.exists() else path.parent
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
     def _on_settings_triggered(self) -> None:
         SettingsDialog(self).exec()
@@ -246,6 +308,98 @@ class MainWindow(QMainWindow):
             self.set_connected(False)
             self.set_capabilities(
                 TenantCapabilities(has_intune=False, has_exchange=False, has_audit_logs=False))
+
+    def _on_google_settings_triggered(self) -> None:
+        dialog = GoogleSettingsDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Mailbox admin depends only on the service account path just
+            # saved, not on the interactive Google sign-in state -- re-check
+            # it now rather than waiting for a restart.
+            self.google_mailbox_page.refresh_configuration()
+
+    @asyncSlot()
+    async def _on_google_sign_in_triggered(self) -> None:
+        config = load_google_config()
+        if config is None:
+            QMessageBox.information(
+                self,
+                "Google Workspace not configured",
+                "Set a Client ID and Client Secret first via "
+                "Google Workspace > Settings...",
+            )
+            return
+
+        # Same reasoning as _on_sign_in_triggered: block a second concurrent
+        # attempt while this one's interactive OAuth flow is still awaiting.
+        self.google_sign_in_action.setEnabled(False)
+        dialog = LoginDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            self.google_sign_in_action.setEnabled(True)
+            return
+        profile_name = dialog.profile_name() or "default"
+
+        announce(self.google_connection_label, f"Signing in to {profile_name}...")
+        loop = asyncio.get_event_loop()
+        try:
+            google_auth_manager = GoogleAuthManager(profile_name, config)
+            # InstalledAppFlow's local-server flow opens a system browser and
+            # blocks on a local redirect listener -- run it off the UI thread
+            # the same way the MSAL interactive flow is run above.
+            result = await loop.run_in_executor(None, google_auth_manager.sign_in_interactive)
+        except Exception as exc:  # OAuth/network/config errors -- surface, don't crash
+            self.set_google_connected(False)
+            QMessageBox.critical(self, "Sign-in failed", friendly_error_message(exc))
+            return
+
+        self._google_auth_manager = google_auth_manager
+        self.set_google_connected(True, result.account_email)
+        self._directory_client = build_directory_client(google_auth_manager)
+        self._reports_client = build_reports_client(google_auth_manager)
+        self.google_users_page.set_directory_client(self._directory_client)
+        self.google_groups_page.set_directory_client(self._directory_client)
+        self.google_devices_page.set_directory_client(self._directory_client)
+        self.google_sign_in_logs_page.set_reports_client(self._reports_client)
+        self.google_admin_audit_page.set_reports_client(self._reports_client)
+
+    def _on_google_sign_out_triggered(self) -> None:
+        try:
+            if self._google_auth_manager is not None:
+                self._google_auth_manager.sign_out()
+        finally:
+            # Same reasoning as _on_sign_out_triggered: whatever sign_out()
+            # does, don't leave the UI claiming to be connected afterward.
+            self._google_auth_manager = None
+            self._directory_client = None
+            self._reports_client = None
+            self.google_users_page.set_directory_client(None)
+            self.google_groups_page.set_directory_client(None)
+            self.google_devices_page.set_directory_client(None)
+            self.google_sign_in_logs_page.set_reports_client(None)
+            self.google_admin_audit_page.set_reports_client(None)
+            self.set_google_connected(False)
+
+    def on_asyncio_exception(self, loop, context: dict) -> None:
+        """Registered as the qasync event loop's exception handler in
+        app.py. Logs the same way error_log.log_asyncio_exception always
+        has, and additionally surfaces a non-modal notification -- without
+        this, an exception an @asyncSlot's own try/except didn't catch was
+        previously only ever visible by checking Help > Open Error Log."""
+        log_asyncio_exception(loop, context)
+        exc = context.get("exception")
+        summary = str(exc) if exc is not None else context.get("message", "An unexpected error occurred")
+        if self._error_notice_box is None:
+            self._error_notice_box = QMessageBox(self)
+            self._error_notice_box.setWindowTitle("Unexpected error")
+            self._error_notice_box.setIcon(QMessageBox.Icon.Warning)
+        self._error_notice_box.setText(
+            "Something unexpected went wrong in the background:\n\n"
+            f"{summary}\n\n"
+            "Details were written to the error log (Help > Open Error Log)."
+        )
+        # Non-modal: a background failure shouldn't block the UI the way a
+        # QMessageBox.exec() would, and re-showing an already-open box just
+        # updates its text instead of stacking a new window.
+        self._error_notice_box.show()
 
     # -- auto-update ------------------------------------------------------- #
     @asyncSlot()
@@ -356,6 +510,25 @@ class MainWindow(QMainWindow):
                 self.audit_log_page = page
         self.nav_list.setCurrentRow(0)
 
+    def _add_google_pages(self) -> None:
+        for label, page_cls in _GOOGLE_PAGES:
+            item = QListWidgetItem(label)
+            self.nav_list.addItem(item)
+            page = page_cls()
+            self.page_stack.addWidget(page)
+            if label == "Google Users":
+                self.google_users_page = page
+            elif label == "Google Groups":
+                self.google_groups_page = page
+            elif label == "Google Devices":
+                self.google_devices_page = page
+            elif label == "Google Mailbox":
+                self.google_mailbox_page = page
+            elif label == "Google Sign-in logs":
+                self.google_sign_in_logs_page = page
+            elif label == "Google Admin audit log":
+                self.google_admin_audit_page = page
+
     def set_capabilities(self, capabilities: TenantCapabilities) -> None:
         """Add/remove the Intune/Exchange/Sign-in-logs nav entries based on
         what the connected tenant is actually licensed for."""
@@ -397,3 +570,9 @@ class MainWindow(QMainWindow):
         self.sign_out_action.setEnabled(connected)
         message = f"Connected to {profile_name}" if connected else "Not connected"
         announce(self.connection_label, message)
+
+    def set_google_connected(self, connected: bool, profile_name: str = "") -> None:
+        self.google_sign_in_action.setEnabled(not connected)
+        self.google_sign_out_action.setEnabled(connected)
+        message = f"Google: connected to {profile_name}" if connected else "Google: not connected"
+        announce(self.google_connection_label, message)

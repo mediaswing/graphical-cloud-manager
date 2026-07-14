@@ -1,12 +1,16 @@
 # Graphical Cloud Manager
 
-This is a fully accessible, graphical, cross-platform tool for managing Microsoft Entra, Intune, and Exchange.
+This is a fully accessible, graphical, cross-platform tool for managing Microsoft Entra, Intune, Exchange, and Google Workspace.
 
 See [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture, tech stack rationale, auth model, and accessibility implementation strategy.
 
 ## Status
 
 Sign-in, capability detection, and the main window/navigation shell are in place. Users, Groups, Devices, Licensing (per-user and group-based), Roles (Entra directory roles), Bulk user import, and a local Audit log are implemented against Microsoft Graph; Sign-in logs appear when the tenant has Azure AD Premium P1+. Intune (read-only device inventory) and Exchange (aliases, automatic replies, rule-based forwarding, usage report) appear when capability detection finds them. Every list page can export to CSV, and single-user Delete/Disable show an impact preview before confirming -- see `docs/DESIGN.md` section 6 for exactly what each covers, and section 10 for what's intentionally not yet implemented.
+
+A parallel Google Workspace integration is also implemented, signed into independently via its own "Google Workspace" menu: Users, Groups, and mobile Devices against the Admin SDK Directory API; Sign-in logs and an Admin audit log against the Reports API; and Mailbox admin (vacation responder, forwarding, delegates) via the Gmail API, which requires a separate service-account credential with domain-wide delegation configured in Google Workspace > Settings, since mailbox actions can't use the same interactive sign-in the other Google pages do.
+
+Application-wide error logging (a local rotating log, viewable via Help > Open Error Log) now also catches exceptions that aren't specifically handled elsewhere, with a notification dialog for background/async failures.
 
 ## Development setup
 

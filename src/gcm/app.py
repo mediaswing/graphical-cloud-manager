@@ -9,10 +9,14 @@ import sys
 import qasync
 from PySide6.QtWidgets import QApplication
 
+from gcm.services.error_log import configure_logging, log_unhandled_exception
 from gcm.ui.main_window import MainWindow
 
 
 def main() -> int:
+    configure_logging()
+    sys.excepthook = log_unhandled_exception
+
     app = QApplication(sys.argv)
     app.setApplicationName("Graphical Cloud Manager")
 
@@ -22,6 +26,13 @@ def main() -> int:
     window = MainWindow()
     window.resize(900, 600)
     window.show()
+
+    # Registered only once the window exists: an asyncio-level exception
+    # (one an @asyncSlot's own try/except didn't catch) both logs, via
+    # error_log.log_asyncio_exception, and surfaces a notification --
+    # otherwise a background task failing would be invisible until someone
+    # thought to check Help > Open Error Log.
+    event_loop.set_exception_handler(window.on_asyncio_exception)
 
     with event_loop:
         return event_loop.run_forever()

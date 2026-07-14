@@ -7,6 +7,17 @@ Build with:  pyinstaller --noconfirm --clean GraphicalCloudManager.spec
 points, which PyInstaller's static analysis can't see -- so, like the other
 mediaswing apps pick their platform's optional-dependency driver explicitly,
 we add the platform's keyring backend as a hidden import here.
+
+`googleapiclient.discovery.build(...)` (used for the Directory/Reports/Gmail
+API clients) loads its API definitions from JSON files bundled as package
+*data* under googleapiclient/discovery_cache/documents/, not via a Python
+import -- PyInstaller's static analysis can't see that on its own. No extra
+`datas` entry is needed for it here, though: `pyinstaller-hooks-contrib`
+(a hard dependency of `pyinstaller` itself, so it's always present) ships
+hook-googleapiclient.model.py, which already collects that whole directory
+automatically. Verified by building this spec and confirming
+dist/.../googleapiclient/discovery_cache/documents/*.json exist and the
+frozen app starts cleanly.
 """
 import sys
 

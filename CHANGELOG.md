@@ -9,6 +9,30 @@ section below as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-14
+
+### Added
+- Google Workspace administration, signed into independently via a new
+  "Google Workspace" menu (its own Settings/Sign in/Sign out, separate from
+  the Microsoft "Tenant" menu):
+  - Users: list/search, create, edit, suspend/unsuspend, reset password,
+    delete.
+  - Groups: list/search, create, delete, and a membership panel (add/remove
+    members by email).
+  - Devices: mobile device inventory with approve/block/remote wipe/unenroll.
+  - Mailbox admin: vacation responder, auto-forwarding (including Google's
+    required forwarding-address verification step), and delegates. This
+    needs a separate service-account credential with domain-wide delegation,
+    configured in Google Workspace > Settings, since mailbox actions can't
+    use the same interactive per-admin sign-in the other Google pages do.
+  - Sign-in logs and an Admin audit log, both read from the Admin SDK
+    Reports API.
+- Application-wide error logging: a local rotating log file (Help > Open
+  Error Log) now captures exceptions that weren't specifically handled
+  elsewhere -- both on the main thread and inside background `@asyncSlot`
+  tasks -- instead of a background failure silently vanishing. Background
+  failures also show a notification dialog.
+
 ## [0.6.2] - 2026-07-12
 
 ### Fixed

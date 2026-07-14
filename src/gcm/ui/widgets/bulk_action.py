@@ -23,11 +23,17 @@ async def run_bulk_action(
     action: Callable[[T], Awaitable[None]],
     *,
     display_name: Callable[[T], str],
+    format_error: Callable[[Exception], str] = friendly_error_message,
 ) -> tuple[int, list[tuple[str, str]]]:
     """Await `action(item)` for every item, even if earlier ones raise.
 
+    `format_error` defaults to Graph's friendly_error_message, but callers
+    working against a different backend (e.g. Google's
+    services.google_errors.friendly_google_error) can pass their own --
+    this helper has no provider-specific logic of its own.
+
     Returns (succeeded_count, failures), where failures is a list of
-    (display_name, friendly_error_message) pairs for each item that raised.
+    (display_name, formatted error) pairs for each item that raised.
     """
     succeeded = 0
     failures: list[tuple[str, str]] = []
@@ -36,7 +42,7 @@ async def run_bulk_action(
             await action(item)
             succeeded += 1
         except Exception as exc:  # noqa: BLE001 - collected, not swallowed
-            failures.append((display_name(item), friendly_error_message(exc)))
+            failures.append((display_name(item), format_error(exc)))
     return succeeded, failures
 
 
